@@ -34,7 +34,7 @@ PAGE_SIZE = SETTINGS["interface"]["page_size"]
 READER_ENABLED = SETTINGS["reader"]["enabled"]
 WRITE_BEEP_T = SETTINGS["reader"]["write_beep_t"]
 PENDING_ID_PATH = app_path(SETTINGS["state"]["pending_id_file"])
-VERSION = "2.2"
+VERSION = "2.2.1"
 CONSOLE = None
 ACCOUNT_COLUMNS = "id, card_id, name, money, losa, netrunner_lvl, police"
 EDIT_FIELDS = {"name": "имя", "money": "деньги", "losa": "рейт",
@@ -834,7 +834,7 @@ def inspect_entity(db, selected):
             print(clean(error))
             return
         print("\n" + entity_text(selected))
-        print("Доступные замки:" if selected.kind == "account" else "Аккаунты с правом доступа:")
+        print("\nДоступные замки:" if selected.kind == "account" else "Аккаунты с правом доступа:")
         lines = db.access_table(selected)
         page = min(page, max(0, (len(lines) - 1) // PAGE_SIZE))
         pages = show_page(lines, page) if lines else 1
@@ -972,12 +972,12 @@ def main():
         db = Database(connection)
         db.check_read_access()
         recover_pending_id(db)
+        print("Подключено. Изменения выполняются только после подтверждения.")
         CONSOLE = CardConsole(READER_ENABLED)
         print("Карта выбирает аккаунт только в поиске и списке кандидатов.")
-        print("USB считыватель можно подключить во время работы, все другие программы работающие со считывателем должны быть закрыты")
+        print("USB считыватель можно подключить во время работы, все другие программы работающие со считывателем должны быть закрыты.")
         if READER_ENABLED and READER_IMPORT_ERROR:
             print(f"Модуль считывателя недоступен: {clean(READER_IMPORT_ERROR)}. Ручной поиск работает.")
-        print("Подключено. Изменения выполняются только после подтверждения.")
         while True:
             selected = choose_candidate(db)
             if selected is not None:
