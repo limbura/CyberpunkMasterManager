@@ -1,0 +1,26 @@
+# Настройки CYBERWALL - менеджмент для мастеров. Python 3.11+.
+# Пароль БД здесь не хранится: программа запрашивает его при подключении.
+[database]
+host = "127.0.0.1"
+port = 3306
+user = "master"
+name = "cyberwall"
+connect_timeout = 10
+read_timeout = 30
+write_timeout = 30
+
+[interface]
+page_size = 15
+
+[reader]
+enabled = true
+# Относительный путь считается от папки программы, не от текущей папки консоли.
+library_path = "../wcopy_reader_package"
+write_beep_t = 10
+timeout_ms = 750
+poll_interval = 0.25
+error_retry_interval = 1.5
+feedback_retry_interval = 1.0
+
+[state]
+pending_id_file = "pending_id_change.json"

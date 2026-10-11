@@ -1,0 +1,3 @@
+# Единая установка; сформировано build_release.py.
+PyMySQL[rsa]>=1.1,<2
+hidapi==0.15.0
