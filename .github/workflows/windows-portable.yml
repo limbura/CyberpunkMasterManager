@@ -1,0 +1,51 @@
+name: Windows portable build
+
+on:
+  workflow_dispatch:
+    inputs:
+      reader_ref:
+        description: 'Commit or tag in limbura/CyberpunkPcRfidReader'
+        default: '91f290305a09d5c4b99ee0829fc82e8ecf85b052'
+        required: true
+  push:
+    branches: [master]
+    paths:
+      - 'cyberwall_master_manager_v2.2.1/**'
+      - '.github/workflows/windows-portable.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: CyberpunkMasterManager
+      - uses: actions/checkout@v4
+        with:
+          repository: limbura/CyberpunkPcRfidReader
+          ref: ${{ inputs.reader_ref || '91f290305a09d5c4b99ee0829fc82e8ecf85b052' }}
+          path: CyberpunkPcRfidReader
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install test dependencies
+        working-directory: CyberpunkMasterManager/cyberwall_master_manager_v2.2.1
+        run: python -m pip install -r requirements.txt
+      - name: Test application and builder
+        working-directory: CyberpunkMasterManager/cyberwall_master_manager_v2.2.1
+        run: python -m unittest discover -s tests -v
+      - name: Build and self-test offline ZIP
+        working-directory: CyberpunkMasterManager/cyberwall_master_manager_v2.2.1
+        run: python build_release.py
+      - name: Upload offline ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyberwall-master-manager-windows-x64
+          path: CyberpunkMasterManager/builds/*_windows_x64.zip
+          if-no-files-found: error
+          retention-days: 30

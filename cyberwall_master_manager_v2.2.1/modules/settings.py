@@ -1,8 +1,16 @@
 """Чтение настроек; никаких секретов и изменений конфигурации при запуске."""
 from pathlib import Path
 import tomllib
+import sys
 
-APP_DIR = Path(__file__).resolve().parents[1]
+def application_directory():
+    """В EXE настройки и журнал лежат рядом с EXE, не в _internal."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
+APP_DIR = application_directory()
 
 
 def load_settings(path=APP_DIR / "config.toml"):

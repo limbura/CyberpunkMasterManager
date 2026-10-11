@@ -15,15 +15,19 @@ from .settings import SETTINGS, app_path
 READER_SETTINGS = SETTINGS["reader"]
 READER_IMPORT_ERROR = None
 try:
-    # Независимая папка библиотеки. Не ищем случайную другую версию в PATH.
-    import importlib.util
-    reader_file = app_path(READER_SETTINGS["library_path"]) / "wcopy_reader.py"
-    if not reader_file.is_file():
-        raise ImportError(f"Не найден {reader_file}")
-    spec = importlib.util.spec_from_file_location("wcopy_reader", reader_file)
-    rfid = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = rfid
-    spec.loader.exec_module(rfid)
+    if getattr(sys, "frozen", False):
+        # В готовой сборке API и hidapi упакованы PyInstaller; внешний .py не нужен.
+        import wcopy_reader as rfid
+    else:
+        # Независимая папка библиотеки. Не ищем случайную другую версию в PATH.
+        import importlib.util
+        reader_file = app_path(READER_SETTINGS["library_path"]) / "wcopy_reader.py"
+        if not reader_file.is_file():
+            raise ImportError(f"Не найден {reader_file}")
+        spec = importlib.util.spec_from_file_location("wcopy_reader", reader_file)
+        rfid = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = rfid
+        spec.loader.exec_module(rfid)
 except (ImportError, OSError) as error:
     READER_IMPORT_ERROR = str(error)
     rfid = None
