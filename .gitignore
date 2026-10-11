@@ -1,0 +1,31 @@
+# VS Code
+
+.vscode/
+
+# Arduino build files
+
+build/
+out/
+
+# Compiled binaries
+
+*.bin
+*.elf
+*.hex
+*.map
+
+# OS garbage
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Архивы
+*.zip
+
+# Виртуальные окружения Python
+.venv/
+
+# Кэш Python
+__pycache__/
+*.py[cod]
