@@ -104,9 +104,17 @@ class WorkflowTests(unittest.TestCase):
 
     def test_create_wizard_all_fields_and_sticker_reminder(self):
         db = self.fake_db()
-        with patch("builtins.input", side_effect=["Банк Востока", "00123", "0", "100", "0", "0", "", "", "да"]):
+        db.account_schema.return_value = [
+            {**col, "Default": "12345"} if col["Field"] == "joinrpg_id" else col
+            for col in SCHEMA
+        ]
+        with patch("builtins.input", side_effect=["Банк Востока", "00123", "0", "100", "0", "0", "", "да"]) as prompt:
             result = app.create_account(db)
         db.create_account.assert_called_once_with(VALUES)
+        self.assertEqual(prompt.call_count, 8)  # Семь полей и подтверждение; JoinRPG не запрашивается.
+        self.assertIn("принадлежность (occupancy)", self.output.getvalue())
+        self.assertNotIn("занятие", self.output.getvalue())
+        self.assertNotIn("ID заявки JoinRPG (joinrpg_id)", self.output.getvalue())
         self.assertEqual(result.card_id, 75)
         self.assertIn("123 456 789", self.output.getvalue())
         self.assertIn("Напиши на наклейке", self.output.getvalue())
@@ -128,6 +136,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("`card_id`", insert[0])
         self.assertNotIn("Банк", insert[0])
         self.assertIn("00123", insert[1])
+        self.assertIsNone(insert[1][[col["Field"] for col in SCHEMA].index("joinrpg_id")])
         self.assertEqual(cursor.calls[-1][1], (75,))
         self.assertEqual(result.number, 123456789)
         conn.commit.assert_called_once()

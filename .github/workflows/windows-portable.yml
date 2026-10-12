@@ -5,7 +5,7 @@ on:
     inputs:
       reader_ref:
         description: 'Commit or tag in limbura/CyberpunkPcRfidReader'
-        default: '91f290305a09d5c4b99ee0829fc82e8ecf85b052'
+        default: '7ee357a008b65ae4a7cf7b71ce46ac7681cc7832'
         required: true
   push:
     branches: [master]
@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: limbura/CyberpunkPcRfidReader
-          ref: ${{ inputs.reader_ref || '91f290305a09d5c4b99ee0829fc82e8ecf85b052' }}
+          ref: ${{ inputs.reader_ref || '7ee357a008b65ae4a7cf7b71ce46ac7681cc7832' }}
           path: CyberpunkPcRfidReader
       - uses: actions/setup-python@v5
         with:

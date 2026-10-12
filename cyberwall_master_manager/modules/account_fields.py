@@ -3,7 +3,7 @@ import re
 
 NAME_RULES = "Имя: от 1 до 3 слов, длина каждого слова — не более 11 символов (включая дефис)."
 LABELS = {"name": "имя", "money": "деньги", "losa": "рейт", "netrunner_lvl": "ур. деки",
-          "police": "полицейские права", "password": "пароль", "occupancy": "занятие",
+          "police": "полицейские права", "password": "пароль", "occupancy": "принадлежность",
           "joinrpg_id": "ID заявки JoinRPG"}
 
 

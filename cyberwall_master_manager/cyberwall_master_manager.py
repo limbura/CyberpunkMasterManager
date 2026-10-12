@@ -572,6 +572,9 @@ def create_account(db):
     columns = db.account_schema()
     values = {}
     for column in columns:
+        if column["Field"] == "joinrpg_id":
+            values["joinrpg_id"] = None
+            continue
         print("\n" + column_hint(column))
         while True:
             # Не удаляем пробелы из пароля и не преобразуем его в число.
