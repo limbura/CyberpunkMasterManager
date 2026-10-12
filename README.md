@@ -174,7 +174,7 @@ py -3.13 build_release.py --reader "../../CyberpunkPcRfidReader/wcopy_reader_pac
 
 В репозитории добавлен workflow **Windows portable build**. Он запускает тесты и сборку
 на Windows x64 / Python 3.13, затем сохраняет ZIP как artifact на 30 дней.
-Он запускается при изменениях папки 2.2.1 или файла workflow в ветке master,
+Он запускается при изменениях папки программы или файла workflow в ветке master,
 а также вручную через **Actions → Windows portable build → Run workflow**.
 
 Workflow использует зафиксированный коммит репозитория считывателя; при ручном запуске
