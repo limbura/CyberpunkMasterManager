@@ -11,7 +11,10 @@
 Библиотека **wcopy_reader** не входит в исходную папку этой версии; сборщик встраивает её в готовый EXE.
 Готовый Windows ZIP содержит Python и зависимости и запускается без их установки и без интернета.
 
-Номер версии менять в **cyberwall_master_manager.py**, вначале `VERSION = ""`
+Текущая версия программы — **2.2.2**. Номер версии задаётся в
+[`cyberwall_master_manager/cyberwall_master_manager.py`](cyberwall_master_manager/cyberwall_master_manager.py),
+в переменной `VERSION`. Имя папки программы от версии не зависит.
+При выпуске новой версии обнови также номер в этом README; имя ZIP сборщик формирует из `VERSION`.
 
 ## Запуск из репозитория
 
@@ -32,7 +35,7 @@ library_path = "../../CyberpunkPcRfidReader/wcopy_reader_package"
 
 Папка должна непосредственно содержать `wcopy_reader.py`.
 
-Два `../` поднимают от папки версии до общей папки `Cyberpunk`. Путь считается от
+Два `../` поднимают от папки программы до общей папки `Cyberpunk`. Путь считается от
 папки программы, независимо от текущей папки терминала. Если папки расположены иначе,
 измени путь; можно использовать абсолютный путь с `/`, например:
 
@@ -44,7 +47,7 @@ library_path = "F:/Documents/Arduino/MG NW/Cyberpunk/CyberpunkPcRfidReader/wcopy
    открытого в корне репозитория программы:
 
 ```powershell
-cd .\cyberwall_master_manager_v2.2.1
+cd .\cyberwall_master_manager
 .\start.bat
 ```
 
@@ -140,7 +143,7 @@ py -3.13 build_release.py
 и имя архива:
 
 ```powershell
-py -3.13 build_release.py --reader "../../CyberpunkPcRfidReader/wcopy_reader_package_v1.4.3_beep_duration" --output "../builds/cyberwall_master_manager_v2.2.1_windows_x64.zip"
+py -3.13 build_release.py --reader "../../CyberpunkPcRfidReader/wcopy_reader_package" --output "../builds/cyberwall_master_manager_windows_x64.zip"
 ```
 
 Относительные аргументы `--reader` и `--output` считаются от текущей папки терминала.
@@ -178,8 +181,13 @@ py -3.13 build_release.py --reader "../../CyberpunkPcRfidReader/wcopy_reader_pac
 а также вручную через **Actions → Windows portable build → Run workflow**.
 
 Workflow использует зафиксированный коммит репозитория считывателя; при ручном запуске
-можно выбрать другой commit/tag через `reader_ref`. Папка версии библиотеки должна
+можно выбрать другой commit/tag через `reader_ref`. Папка библиотеки должна
 соответствовать пути в config.toml. Саму библиотеку в Git менеджера копировать не нужно.
+`reader_ref` выбирает версию считывателя, а **Use workflow from** — ветку менеджера.
+Изменения в отдельном репозитории библиотеки сами по себе не запускают эту сборку:
+для новой версии библиотеки запусти workflow вручную с её commit/tag либо обнови
+оба значения ссылки на коммит в `.github/workflows/windows-portable.yml`.
+Старые коммиты библиотеки могут содержать другую структуру папок.
 
 После успешного запуска открой его страницу, раздел **Artifacts**, скачай
 `cyberwall-master-manager-windows-x64` и извлеки находящийся внутри пользовательский ZIP.
@@ -328,7 +336,7 @@ INSERT/UPDATE/DELETE/CALL нет. После восстановления свя
 - UPDATE(description) и DELETE на locks — новые действия с замками;
 - DELETE на lock_access — очистка прав при удалении аккаунта/замка.
 
-Прямой UPDATE main.id или main.card_id не используется. `police` должен допускать NULL.
+Прямой UPDATE main.id или main.card_id не используется. `police` и `joinrpg_id` должны допускать NULL.
 Программа не меняет привилегии и не выполняет миграций автоматически.
 Если у прежнего master отсутствуют новые права, их должен добавить администратор БД.
 Для атомарных операций таблицы и затрагиваемые триггерами таблицы должны быть транзакционными
