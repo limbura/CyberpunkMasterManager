@@ -24,3 +24,5 @@ feedback_retry_interval = 1.0
 
 [state]
 pending_id_file = "pending_id_change.json"
+# Список аккаунтов и результаты пакетной записи. Не удалять для продолжения работы.
+batch_cards_file = "batch_cards.json"

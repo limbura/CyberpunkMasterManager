@@ -34,9 +34,9 @@ USER_README = """CYBERWALL - менеджмент для мастеров
 
 Переноси всю папку целиком: EXE использует служебные файлы из _internal.
 Не запускай EXE прямо из ZIP. Папка программы должна разрешать запись.
-Настройки и pending_id_change.json хранятся рядом с EXE. Используй одну запущенную
+Настройки, pending_id_change.json и batch_cards.json хранятся рядом с EXE. Используй одну запущенную
 копию программы из этой папки. При обновлении распакуй новую версию отдельно и
-перенеси свои настройки и незавершённый pending_id_change.json, если он остался.
+перенеси свои настройки и рабочие журналы pending_id_change.json / batch_cards.json, если они остались.
 
 USB-считыватель опционален, подключать его можно во время работы.
 Закрой nfcPro и другие приложения, работающие со считывателем.
@@ -46,6 +46,10 @@ USB-считыватель опционален, подключать его м�
 
 Поиск: имя, описание, ID, card_id или часть номера. Enter — все записи.
 Карта выбирает аккаунт в поиске. :new — создать аккаунт, :b — назад, :q — выход.
+:batch — пакетная запись карт; «продолжить работу» восстанавливает прогресс.
+Подпиши наклейку, положи карту и введи ID с наклейки. Дождись проверки и убери карту.
+:skip — пропуск, :card N — переход к card_id, :id N — переход к ID, :report — итоги.
+Старые журналы batch_cards-*.json — архивы предыдущей работы; текущий — batch_cards.json.
 Для записи карты выбери аккаунт, затем пункт 11. На наклейке должен быть его ID.
 Смена ID требует обновления наклейки и подтверждения номера.
 
@@ -132,8 +136,11 @@ def resolve_reader(reader=None, app_dir=None):
 
 def portable_config(source):
     """Меняем только пути в копии; остальные пользовательские настройки сохраняются."""
+    if "batch_cards_file" not in tomllib.loads(source).get("state", {}):
+        source = re.sub(r"(?m)^\[state\]\s*$", '[state]\nbatch_cards_file = "batch_cards.json"', source, count=1)
     for section, key, value in (("reader", "library_path", "bundled"),
-                                ("state", "pending_id_file", "pending_id_change.json")):
+                                ("state", "pending_id_file", "pending_id_change.json"),
+                                ("state", "batch_cards_file", "batch_cards.json")):
         pattern = rf'(?ms)(^\[{section}\]\s*\n(?:(?!^\[).)*?^{key}\s*=)[^\n]*'
         source, count = re.subn(pattern, lambda match: match[1] + " " + json.dumps(value), source)
         if count != 1:

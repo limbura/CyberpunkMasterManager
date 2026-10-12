@@ -16,6 +16,7 @@ APP_DIR = application_directory()
 def load_settings(path=APP_DIR / "config.toml"):
     with Path(path).open("rb") as stream:
         config = tomllib.load(stream)
+    config.setdefault("state", {}).setdefault("batch_cards_file", "batch_cards.json")
     for section, keys in {
         "database": ("host", "port", "user", "name", "connect_timeout", "read_timeout", "write_timeout"),
         "interface": ("page_size",),
@@ -41,10 +42,12 @@ def load_settings(path=APP_DIR / "config.toml"):
     if type(config["reader"]["enabled"]) is not bool:
         raise ValueError("В config.toml [reader] enabled: true или false.")
     for section, keys in {"database": ("host", "user", "name"),
-                          "reader": ("library_path",), "state": ("pending_id_file",)}.items():
+                          "reader": ("library_path",), "state": ("pending_id_file", "batch_cards_file")}.items():
         for key in keys:
             if not isinstance(config[section][key], str) or not config[section][key].strip():
                 raise ValueError(f"В config.toml [{section}] {key}: непустая строка.")
+    if (APP_DIR / config["state"]["batch_cards_file"]).resolve() == (APP_DIR / config["state"]["pending_id_file"]).resolve():
+        raise ValueError("Журналы batch_cards_file и pending_id_file должны быть разными файлами.")
     return config
 
 

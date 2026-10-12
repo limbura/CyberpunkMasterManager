@@ -29,3 +29,8 @@ desktop.ini
 # Кэш Python
 __pycache__/
 *.py[cod]
+
+# Локальные журналы и блокировки пакетной записи
+batch_cards*.json
+batch_cards*.json.tmp
+batch_cards*.json.lock

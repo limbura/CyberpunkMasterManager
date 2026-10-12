@@ -19,6 +19,17 @@ from modules.settings import application_directory, load_settings
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_legacy_config_gets_batch_journal_and_release_keeps_it_local(self):
+        source = (build.APP_DIR / 'config.toml').read_text(encoding='utf-8')
+        legacy = '\n'.join(line for line in source.splitlines() if not line.startswith('batch_cards_file'))
+        with tempfile.TemporaryDirectory() as temp:
+            config = Path(temp) / 'config.toml'
+            config.write_text(legacy, encoding='utf-8')
+            self.assertEqual(load_settings(config)['state']['batch_cards_file'], 'batch_cards.json')
+        self.assertEqual(tomllib.loads(build.portable_config(legacy))['state']['batch_cards_file'], 'batch_cards.json')
+        custom = source.replace('batch_cards_file = "batch_cards.json"', 'batch_cards_file = "D:/private/cards.json"')
+        self.assertEqual(tomllib.loads(build.portable_config(custom))['state']['batch_cards_file'], 'batch_cards.json')
+
     def test_redirected_windows_log_supports_russian(self):
         raw = io.BytesIO()
         stream = io.TextIOWrapper(raw, encoding='cp1252')
@@ -61,6 +72,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(result['database']['host'], '192.168.1.20')
         self.assertEqual(result['reader']['library_path'], 'bundled')
         self.assertEqual(result['state']['pending_id_file'], 'pending_id_change.json')
+        self.assertEqual(result['state']['batch_cards_file'], 'batch_cards.json')
         self.assertNotIn('D:/private', build.portable_config(source))
 
     def test_source_staging_omits_tests_settings_and_state(self):
@@ -73,7 +85,7 @@ class ReleaseTests(unittest.TestCase):
             build.stage_source(reader, stage)
             self.assertEqual((stage / 'wcopy_reader.py').read_bytes(), original)
             self.assertTrue((stage / 'release_entry.py').is_file())
-            for excluded in ('tests', 'config.toml', 'pending_id_change.json', 'start.bat', 'build_release.py'):
+            for excluded in ('tests', 'config.toml', 'pending_id_change.json', 'batch_cards.json', 'start.bat', 'build_release.py'):
                 self.assertFalse((stage / excluded).exists(), excluded)
 
     def test_zip_contains_only_runtime_tree_and_never_overwrites(self):

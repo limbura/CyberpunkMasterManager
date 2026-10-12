@@ -6,6 +6,7 @@ import traceback
 
 
 def self_test():
+    import inspect
     import pymysql
     import pymysql._auth
     import hid
@@ -15,6 +16,7 @@ def self_test():
     from modules.settings import APP_DIR, SETTINGS
     from modules.card_console import rfid, READER_IMPORT_ERROR
     import cyberwall_master_manager as app
+    from modules import batch_cards
 
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Проверять нужно собранный EXE.")
@@ -28,6 +30,10 @@ def self_test():
     # Проверяем загрузку нативного HID-модуля без открытия устройства.
     if not callable(hid.enumerate):
         raise RuntimeError("hidapi недоступна.")
+    if not {"expected_uid", "expected_block"} <= set(inspect.signature(wcopy_reader.write_card_number).parameters):
+        raise RuntimeError("Пакетной записи требуется API wcopy_reader 1.4.4+.")
+    if not callable(batch_cards.run):
+        raise RuntimeError("Модуль пакетной записи отсутствует в сборке.")
     # Проверяем реальную RSA-ветку авторизации MySQL, включая нативную cryptography.
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public = key.public_key().public_bytes(serialization.Encoding.PEM,

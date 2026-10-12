@@ -7,6 +7,7 @@
 """
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 from getpass import getpass
 import sys
 import json
@@ -16,6 +17,7 @@ from pathlib import Path
 from modules.settings import SETTINGS, app_path
 from modules.card_console import CardConsole, ScannedCard, CardNotPresentError, READER_IMPORT_ERROR
 from modules.account_fields import validate_name, NAME_RULES, LABELS, column_hint, parse_column, editable_columns, validate_column
+from modules import batch_cards
 from typing import Optional
 
 try:
@@ -34,7 +36,8 @@ PAGE_SIZE = SETTINGS["interface"]["page_size"]
 READER_ENABLED = SETTINGS["reader"]["enabled"]
 WRITE_BEEP_T = SETTINGS["reader"]["write_beep_t"]
 PENDING_ID_PATH = app_path(SETTINGS["state"]["pending_id_file"])
-VERSION = "2.2.3"
+VERSION = "2.3.0"
+BATCH_PATH = app_path(SETTINGS["state"]["batch_cards_file"])
 CONSOLE = None
 ACCOUNT_COLUMNS = "id, card_id, name, money, losa, netrunner_lvl, police"
 EDIT_FIELDS = {"name": "имя", "money": "деньги", "losa": "рейт",
@@ -173,6 +176,31 @@ class Database:
         self.rows("SELECT id, card_id, name, money, losa, netrunner_lvl, police FROM main LIMIT 0")
         self.rows("SELECT lock_id, description FROM locks LIMIT 0")
         self.rows("SELECT lock_id, card_id FROM lock_access LIMIT 0")
+
+    def batch_accounts(self):
+        return self.rows("SELECT card_id, id, name FROM main ORDER BY card_id")
+
+    def batch_account(self, card_id):
+        rows = self.rows("SELECT card_id, id, name FROM main WHERE card_id = %s", (card_id,))
+        return rows[0] if rows else None
+
+    def batch_by_id(self, number):
+        rows = self.rows("SELECT card_id, id, name FROM main WHERE id = %s", (number,))
+        return rows[0] if rows else None
+
+    @contextmanager
+    def batch_guard(self, expected):
+        self.connection.begin()
+        try:
+            rows = self.rows("SELECT card_id, id, name FROM main WHERE card_id = %s FOR UPDATE",
+                             (expected["card_id"],))
+            if not rows or rows[0] != expected:
+                raise batch_cards.BatchError("Аккаунт удалён или его данные изменились. Заново проверь наклейку.")
+            yield
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
 
     def account_schema(self):
         return editable_columns(self.rows("SHOW COLUMNS FROM main"))
@@ -470,7 +498,16 @@ def choose_candidate(db, kind=None):
             print("Можно просто приложить карту аккаунта (повторно — убрать и приложить).")
         if kind is None:
             print(":new — создать новый аккаунт")
+            print(":batch — пакетная запись карт / продолжить работу")
         text = read_input("Строка [Enter — все, :b — назад, :q — выход]: ", allow_card)
+        if kind is None and isinstance(text, str) and text.lower() == ":batch":
+            try:
+                if CONSOLE is None:
+                    raise RuntimeError("Считыватель не инициализирован.")
+                batch_cards.run(db, CONSOLE, BATCH_PATH, database_scope(db), beep_t=WRITE_BEEP_T)
+            except (batch_cards.BatchError, RuntimeError) as error:
+                print(clean(error))
+            continue
         if kind is None and isinstance(text, str) and text.lower() == ":new":
             try:
                 created = create_account(db)
@@ -991,6 +1028,7 @@ def main():
     except OSError as error:
         print(f"Ошибка файла: {clean(error)}")
         print("Если смена ID уже началась, не удаляй pending_id_change.json: перезапусти программу для проверки наклейки.")
+        print("При пакетной записи сохрани batch_cards.json и выбери «продолжить работу»: карта могла измениться.")
         return 1
     except WriteUncertain as error:
         print(clean(error))

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 import os
 import queue
 import select
@@ -281,6 +282,27 @@ class CardConsole:
         finally:
             # В том числе при NoCardError, сбое записи и Ctrl+C: сразу возвращаем
             # опрос + LED, не ждём нового поиска, тайм-аута или перезапуска.
+            with self.condition:
+                self.feedback_retry_at = 0.0
+                self.write_in_progress = False
+                self.condition.notify_all()
+            self.wakeup.set()
+
+    @contextmanager
+    def batch_mode(self):
+        """Один владелец USB на время конвейера; фон не вмешивается в проверки."""
+        if not self.enabled:
+            raise RuntimeError("Пакетная запись требует включённой библиотеки считывателя.")
+        import inspect
+        if not {"expected_uid", "expected_block"} <= set(inspect.signature(rfid.write_card_number).parameters):
+            raise RuntimeError("Для пакетной записи нужна wcopy_reader 1.4.4 или новее. Обнови библиотеку.")
+        self._stop_scan()
+        with self.condition:
+            self.write_in_progress = True
+        try:
+            with self.io_lock:
+                yield rfid
+        finally:
             with self.condition:
                 self.feedback_retry_at = 0.0
                 self.write_in_progress = False
