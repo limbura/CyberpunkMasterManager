@@ -15,7 +15,7 @@ page_size = 15
 [reader]
 enabled = true
 # Относительный путь считается от папки программы, не от текущей папки консоли.
-library_path = "../../CyberpunkPcRfidReader/wcopy_reader_package_v1.4.3_beep_duration"
+library_path = "../../CyberpunkPcRfidReader/wcopy_reader_package"
 write_beep_t = 10
 timeout_ms = 750
 poll_interval = 0.25

@@ -1,18 +1,17 @@
 # CYBERWALL - менеджмент для мастеров
 
-**cyberwall_master_manager v2.2.1**, Python 3.11+. Консольная программа для аккаунтов,
-карт и прав доступа к замкам. Для USB используется независимая **wcopy_reader v1.4.3**.
+**cyberwall_master_manager**, Python 3.11+. Консольная программа для работы с аккаунтами,
+картами, правами доступа к замкам и т.д. Для USB считывателя RFID используется независимая библиотека **wcopy_reader** (отдельный репозиторий CyberpunkPcRfidReader).
 
 Исходники хранятся в двух репозиториях:
 
 - [CyberpunkMasterManager](https://github.com/limbura/CyberpunkMasterManager) — программа;
 - [CyberpunkPcRfidReader](https://github.com/limbura/CyberpunkPcRfidReader) — библиотека считывателя.
 
-В версии 2.2.1 убрана вложенная папка `cyberwall_master_manager`: главный файл,
-`config.toml`, `start.bat` и этот README лежат непосредственно в
-`CyberpunkMasterManager/cyberwall_master_manager_v2.2.1/`.
-Библиотека не входит в исходную папку этой версии; сборщик встраивает её в готовый EXE.
-Готовый Windows ZIP содержит Python и зависимости и запускается без их установки.
+Библиотека **wcopy_reader** не входит в исходную папку этой версии; сборщик встраивает её в готовый EXE.
+Готовый Windows ZIP содержит Python и зависимости и запускается без их установки и без интернета.
+
+Номер версии менять в **cyberwall_master_manager.py**, вначале `VERSION = ""`
 
 ## Запуск из репозитория
 
@@ -21,27 +20,25 @@
 
 | Компонент | Путь |
 |---|---|
-| Программа | `CyberpunkMasterManager/cyberwall_master_manager_v2.2.1/cyberwall_master_manager.py` |
-| Настройки | `CyberpunkMasterManager/cyberwall_master_manager_v2.2.1/config.toml` |
-| Библиотека | `CyberpunkPcRfidReader/wcopy_reader_package_v1.4.3_beep_duration/wcopy_reader.py` |
+| Программа | `CyberpunkMasterManager/cyberwall_master_manager/cyberwall_master_manager.py` |
+| Настройки | `CyberpunkMasterManager/cyberwall_master_manager/config.toml` |
+| Библиотека | `CyberpunkPcRfidReader/wcopy_reader_package/wcopy_reader.py` |
 
-3. В `config.toml` задай параметры подключения к БД. Для указанной структуры путь
-   библиотеки уже настроен правильно:
+3. В `config.toml` задай параметры подключения к БД по умолчанию и путь к библиотеке считывателя, например:
 
 ```toml
-library_path = "../../CyberpunkPcRfidReader/wcopy_reader_package_v1.4.3_beep_duration"
+library_path = "../../CyberpunkPcRfidReader/wcopy_reader_package"
 ```
+
+Папка должна непосредственно содержать `wcopy_reader.py`.
 
 Два `../` поднимают от папки версии до общей папки `Cyberpunk`. Путь считается от
 папки программы, независимо от текущей папки терминала. Если папки расположены иначе,
 измени путь; можно использовать абсолютный путь с `/`, например:
 
 ```toml
-library_path = "F:/Documents/Arduino/MG NW/Cyberpunk/CyberpunkPcRfidReader/wcopy_reader_package_v1.4.3_beep_duration"
+library_path = "F:/Documents/Arduino/MG NW/Cyberpunk/CyberpunkPcRfidReader/wcopy_reader_package"
 ```
-
-Папка должна непосредственно содержать `wcopy_reader.py`. Если снова добавить
-вложенную папку программы, относительный путь потребуется пересчитать.
 
 4. Запусти `start.bat` двойным щелчком. Либо из PowerShell / терминала VS Code,
    открытого в корне репозитория программы:
@@ -59,7 +56,8 @@ cd .\cyberwall_master_manager_v2.2.1
 - Если `winget` недоступен, предлагает установить «Установщик приложений» из Microsoft
   Store либо Python вручную; сам `winget` файл не устанавливает.
 - При отсутствии `pip` вызывает `ensurepip`.
-- При каждом запуске выполняет `pip install -r requirements.txt` для выбранного Python.
+- При каждом запуске проверяет и при необходимости устанавливает требующиеся зависимости:
+  `pip install -r requirements.txt` для выбранного Python.
   Уже подходящие версии не переустанавливаются; `--upgrade` для зависимостей не используется.
 - После успешной подготовки запускает программу тем же Python. При ошибке оставляет
   окно с сообщением открытым.
@@ -70,25 +68,25 @@ cd .\cyberwall_master_manager_v2.2.1
 
 ### Ручной запуск
 
-Если Python 3.11+ уже установлен, из папки версии:
+Если Python 3.11+ уже установлен, из папки с программой:
 
 ```powershell
 py -3 -m pip install -r requirements.txt
 py -3 cyberwall_master_manager.py
 ```
 
-В папке программы один `requirements.txt`: он включает PyMySQL и hidapi.
+В папке программы есть `requirements.txt`: он включает PyMySQL и hidapi.
 У библиотеки остаётся собственный `requirements.txt` для независимого использования;
 для запуска менеджера отдельно устанавливать его не требуется.
 
-Считыватель не обязателен. Основная программа допускает работу без устройства,
+Считыватель RFID не обязателен. Основная программа допускает работу без устройства,
 без папки библиотеки или без hidapi. Для установки только драйвера БД вручную:
 `py -3 -m pip install "PyMySQL[rsa]>=1.1,<2"`, затем `py -3 cyberwall_master_manager.py`.
 В этом случае запускай Python-файл напрямую: `start.bat` всё равно обрабатывает
 полный `requirements.txt`, включая hidapi, даже при `reader.enabled = false`.
-Без USB сохраняются поиск с клавиатуры и действия с БД; запись карты недоступна.
-USB считыватель можно подключить во время работы, все другие программы работающие
-со считывателем должны быть закрыты. При нескольких считывателях оставь подключённым один.
+Без считывателя сохраняются поиск с клавиатуры и действия с БД; запись карты недоступна.
+Считыватель можно подключить во время работы, все другие программы работающие
+со считывателем должны быть закрыты. Должен быть подключен только один считыватель.
 
 ## Офлайн-комплект для конечных пользователей
 
@@ -127,7 +125,7 @@ USB считыватель можно подключить во время ра�
 **3.13 x64**. Сборщик не является кросс-компилятором и на Linux/macOS завершится
 с объяснением. На сборочном ПК обычно нужен интернет; на ПК конечного пользователя — нет.
 
-Обнови исходники двух репозиториев. Из папки `cyberwall_master_manager_v2.2.1`:
+Обнови исходники двух репозиториев. Из папки `cyberwall_master_manager` выполни:
 
 ```powershell
 py -3.13 build_release.py
@@ -137,7 +135,7 @@ py -3.13 build_release.py
 `winget install --id Python.Python.3.13 --exact --source winget --scope user`.
 С другой совместимой 64-битной версией Python команда — `py -3 build_release.py`.
 
-**Путь к библиотеке теперь берётся из `config.toml`, поля `reader.library_path`.**
+**Путь к библиотеке считывателя берётся из `config.toml`, поля `reader.library_path`.**
 Он считается от папки программы. При необходимости можно явно задать другую библиотеку
 и имя архива:
 
@@ -337,7 +335,7 @@ INSERT/UPDATE/DELETE/CALL нет. После восстановления свя
 
 ## Проверки
 
-Из папки `cyberwall_master_manager_v2.2.1`:
+Из папки `cyberwall_master_manager`:
 
 ```powershell
 py -3 -m unittest discover -s tests -v
