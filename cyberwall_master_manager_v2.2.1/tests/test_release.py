@@ -19,6 +19,24 @@ from modules.settings import application_directory, load_settings
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_redirected_windows_log_supports_russian(self):
+        raw = io.BytesIO()
+        stream = io.TextIOWrapper(raw, encoding='cp1252')
+        with patch.object(sys, 'stdout', stream), patch.object(sys, 'stderr', stream):
+            build.configure_output()
+            print('Сборка готова')
+            stream.flush()
+            self.assertEqual(raw.getvalue().decode('utf-8').strip(), 'Сборка готова')
+
+    def test_build_subprocess_utf8_does_not_override_runtime_environment(self):
+        with patch.object(subprocess, 'run') as run:
+            build.run(['python', '-c', 'pass'])
+            self.assertEqual(run.call_args.kwargs['env']['PYTHONUTF8'], '1')
+            runtime_env = build.clean_runtime_environment()
+            build.run(['app.exe', '--self-test'], env=runtime_env)
+            self.assertEqual(run.call_args.kwargs['env'], runtime_env)
+            self.assertNotIn('PYTHONUTF8', run.call_args.kwargs['env'])
+
     def test_reader_default_uses_config_not_working_directory(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

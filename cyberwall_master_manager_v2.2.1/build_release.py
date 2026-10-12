@@ -92,7 +92,16 @@ print(json.dumps({'python': sys.version.split()[0],
 
 def run(command, **kwargs):
     """Аргументы списком: пути с пробелами не проходят через shell."""
+    if "env" not in kwargs:
+        kwargs["env"] = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     return subprocess.run([str(value) for value in command], check=True, **kwargs)
+
+
+def configure_output():
+    """Русские сообщения работают и в консоли, и в перенаправленном журнале Windows."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 
 def read_version(path, variable):
@@ -262,6 +271,7 @@ def build(reader=None, output=None, *, no_install=False):
 
 
 def main():
+    configure_output()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reader", type=Path, help="Папка библиотеки; по умолчанию reader.library_path из config.toml")
     parser.add_argument("--output", type=Path, help="Новый ZIP; по умолчанию ../builds/<имя>_v<версия>_windows_x64.zip")
