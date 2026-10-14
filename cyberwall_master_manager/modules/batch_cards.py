@@ -100,7 +100,7 @@ class Journal:
             journal.validate(scope)
             return journal
         except (ValueError, KeyError, TypeError, AttributeError) as error:
-            raise BatchError(f"Журнал не загружен: {error}. Он не будет перезаписан.") from error
+            raise BatchError(f"Журнал не загружен: {error} Он не будет перезаписан.") from error
 
     def validate(self, scope):
         d = self.data
