@@ -79,7 +79,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_password_cyrillic_retry_happens_before_connect(self):
         with patch.object(app, "getpass", side_effect=["пароль", "mixЯ", "secret"]), patch.object(app, "read_input", return_value=""), patch.object(app.pymysql, "connect", create=True) as connect:
-            app.connect_interactively()
+            app.connect_interactively(store=Mock(load=Mock(return_value=None)))
         connect.assert_called_once()
         self.assertEqual(connect.call_args.kwargs["password"], "secret")
         self.assertEqual(self.output.getvalue().count("Пароль введён кириллицей"), 2)

@@ -17,6 +17,8 @@ def self_test():
     from modules.card_console import rfid, READER_IMPORT_ERROR
     import cyberwall_master_manager as app
     from modules import batch_cards
+    from modules.connection_store import dpapi
+    from modules.input_history import HistoryCursor
 
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Проверять нужно собранный EXE.")
@@ -34,6 +36,10 @@ def self_test():
         raise RuntimeError("Пакетной записи требуется API wcopy_reader 1.4.4+.")
     if not callable(batch_cards.run):
         raise RuntimeError("Модуль пакетной записи отсутствует в сборке.")
+    if dpapi(dpapi(b"offline-profile-check"), decrypt=True) != b"offline-profile-check":
+        raise RuntimeError("Проверка защиты сохранённого подключения не пройдена.")
+    if HistoryCursor(["test"]).move(-1, "") != "test":
+        raise RuntimeError("Модуль истории ввода недоступен.")
     # Проверяем реальную RSA-ветку авторизации MySQL, включая нативную cryptography.
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public = key.public_key().public_bytes(serialization.Encoding.PEM,

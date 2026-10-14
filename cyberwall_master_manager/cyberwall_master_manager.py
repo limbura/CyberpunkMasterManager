@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """CYBERWALL - менеджмент для мастеров: аккаунты, карты и доступ к замкам. Python 3.11+.
 Запуск: py cyberwall_master_manager.py. См. README.md в архиве.
-Настройки находятся в config.toml. Пароль MySQL запрашивается скрыто.
+Настройки находятся в config.toml. Последнее успешное подключение запоминается.
 Аккаунт всегда определяется по card_id; main.id меняется только через changeId.
 """
 
@@ -18,6 +18,7 @@ from modules.settings import SETTINGS, app_path
 from modules.card_console import CardConsole, ScannedCard, CardNotPresentError, READER_IMPORT_ERROR
 from modules.account_fields import validate_name, NAME_RULES, LABELS, column_hint, parse_column, editable_columns, validate_column
 from modules import batch_cards
+from modules.connection_store import ConnectionStore
 from typing import Optional
 
 try:
@@ -36,7 +37,7 @@ PAGE_SIZE = SETTINGS["interface"]["page_size"]
 READER_ENABLED = SETTINGS["reader"]["enabled"]
 WRITE_BEEP_T = SETTINGS["reader"]["write_beep_t"]
 PENDING_ID_PATH = app_path(SETTINGS["state"]["pending_id_file"])
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 BATCH_PATH = app_path(SETTINGS["state"]["batch_cards_file"])
 CONSOLE = None
 ACCOUNT_COLUMNS = "id, card_id, name, money, losa, netrunner_lvl, police"
@@ -54,6 +55,10 @@ BUSINESS_ERRORS = {
 
 
 class QuitRequested(Exception):
+    pass
+
+
+class DisconnectRequested(Exception):
     pass
 
 
@@ -138,8 +143,12 @@ def entity_text(entity):
     return "\n".join([table.header, table.separator, *table.lines])
 
 
-def read_input(prompt, allow_card=False):
-    value = CONSOLE.read(prompt, allow_card=allow_card) if CONSOLE else input(prompt)
+def raw_input(prompt, *, history=None, allow_card=False):
+    return CONSOLE.read(prompt, allow_card=allow_card, history=history) if CONSOLE else input(prompt)
+
+
+def read_input(prompt, allow_card=False, *, history=None):
+    value = raw_input(prompt, history=history, allow_card=allow_card)
     if isinstance(value, ScannedCard):
         return value
     value = value.strip()
@@ -497,14 +506,18 @@ def choose_candidate(db, kind=None):
         if allow_card:
             print("Можно просто приложить карту аккаунта (повторно — убрать и приложить).")
         if kind is None:
+            print(":disconnect — Отключиться от БД")
             print(":new — создать новый аккаунт")
             print(":batch — пакетная запись карт / продолжить работу")
-        text = read_input("Строка [Enter — все, :b — назад, :q — выход]: ", allow_card)
+        text = read_input("Строка [Enter — все, :b — назад, :q — выход]: ", allow_card,
+                          history=f"search:{kind or 'all'}")
+        if kind is None and isinstance(text, str) and text.lower() == ":disconnect":
+            raise DisconnectRequested
         if kind is None and isinstance(text, str) and text.lower() == ":batch":
             try:
                 if CONSOLE is None:
                     raise RuntimeError("Считыватель не инициализирован.")
-                batch_cards.run(db, CONSOLE, BATCH_PATH, database_scope(db), beep_t=WRITE_BEEP_T)
+                batch_cards.run(db, CONSOLE, BATCH_PATH, database_scope(db), beep_t=WRITE_BEEP_T, ask=CONSOLE.read)
             except (batch_cards.BatchError, RuntimeError) as error:
                 print(clean(error))
             continue
@@ -537,7 +550,8 @@ def choose_candidate(db, kind=None):
         while True:
             pages = show_page(lines, page)
             command = read_input(
-                "Номер кандидата; n/p — страницы; Enter — другой поиск; :b — назад: ", allow_card
+                "Номер кандидата; n/p — страницы; Enter — другой поиск; :b — назад: ", allow_card,
+                history=f"candidates:{kind or 'all'}"
             )
             if isinstance(command, ScannedCard):
                 selected = db.account_by_card(command.number)
@@ -615,7 +629,7 @@ def create_account(db):
         print("\n" + column_hint(column))
         while True:
             # Не удаляем пробелы из пароля и не преобразуем его в число.
-            raw = input("Значение: ")
+            raw = raw_input("Значение: ", history=None if column["Field"] == "password" else "field:" + column["Field"])
             if raw.lower() == ":q":
                 raise QuitRequested
             if raw.lower() == ":b":
@@ -647,7 +661,7 @@ def edit_lock_description(db, selected):
     print(column_hint(column, defaults=False))
     print("Ограничения имени аккаунта по словам и длине слов здесь не применяются.")
     while True:
-        raw = read_input("Новое описание [Enter / :b — назад, :empty — пустая строка]: ")
+        raw = read_input("Новое описание [Enter / :b — назад, :empty — пустая строка]: ", history="lock:description")
         if raw.lower() in ("", ":b"):
             return
         try:
@@ -703,7 +717,8 @@ def edit_account_field(db, selected, field):
         print("Вводится новый итоговый баланс, а не сумма прибавления или списания.")
     while True:
         # Пароль не strip(): пробелы и ведущие нули должны сохраниться буквально.
-        raw = input("Новое значение [Enter / :b — назад, :q — выход]: ")
+        raw = raw_input("Новое значение [Enter / :b — назад, :q — выход]: ",
+                        history=None if field == "password" else "field:" + field)
         command = raw.lower()
         if command == ":q":
             raise QuitRequested
@@ -775,7 +790,9 @@ def confirm_sticker(db, pending):
     print(f"Напиши на наклейке ID: {format_number(number)}")
     while True:
         try:
-            raw = read_input("После изменения наклейки введи написанный ID (или :q — завершить): ")
+            raw = read_input("После изменения наклейки введи написанный ID (:disconnect — отключиться, :q — выход): ")
+            if raw.lower() == ":disconnect":
+                raise DisconnectRequested
         except KeyboardInterrupt:
             raise QuitRequested
         if compact_number(raw) == str(number):
@@ -897,11 +914,14 @@ def inspect_entity(db, selected):
             print("4 — изменить описание замка")
             print("5 — удалить замок")
         print("0 / Enter — новый поиск")
+        print(":disconnect — Отключиться от БД")
         print(":q — выход")
         if pages > 1:
             print("n — следующая страница")
             print("p — предыдущая страница")
-        command = read_input("Действие: ").lower()
+        command = read_input("Действие: ", history="menu:" + selected.kind).lower()
+        if command == ":disconnect":
+            raise DisconnectRequested
         if command in ("", "0", ":b"):
             return
         if command in ("1", "2"):
@@ -949,7 +969,7 @@ def inspect_entity(db, selected):
 
 
 def prompt_default(label, default):
-    return read_input(f"{label} [{default}]: ") or default
+    return read_input(f"{label} [{default}]: ", history="connect:" + label) or default
 
 
 def prompt_database_password():
@@ -963,33 +983,73 @@ def prompt_database_password():
         return password
 
 
-def connect_interactively():
-    host, port, user = DEFAULT_HOST, DEFAULT_PORT, DEFAULT_USER
+def open_database(profile):
+    connection = pymysql.connect(
+        **profile, charset="utf8mb4", cursorclass=DictCursor, autocommit=True,
+        connect_timeout=SETTINGS["database"]["connect_timeout"],
+        read_timeout=SETTINGS["database"]["read_timeout"],
+        write_timeout=SETTINGS["database"]["write_timeout"],
+    )
+    try:
+        Database(connection).check_read_access()
+    except BaseException:
+        connection.close()
+        raise
+    return connection
+
+
+def connect_interactively(*, automatic=True, defaults=None, store=None):
+    store = store if store is not None else ConnectionStore()
+    profile = {"host": DEFAULT_HOST, "port": DEFAULT_PORT, "user": DEFAULT_USER,
+               "database": DATABASE_NAME}
+    if defaults:
+        profile.update(defaults)
+    saved = None
+    if automatic:
+        try:
+            saved = store.load()
+        except (OSError, ValueError):
+            print("Не удалось прочитать сохранённое подключение. Введи параметры заново.")
+        if saved:
+            profile.update(saved)
+            print(f"Автоматическое подключение: {clean(profile['user'])}@{clean(profile['host'])}:"
+                  f"{profile['port']} / {clean(profile['database'])}")
+            try:
+                return open_database(profile)
+            except (pymysql.MySQLError, UnicodeError, OSError):
+                # Не печатаем исключение с потенциальными секретами из авторизации.
+                print("Автоматическое подключение не удалось. Проверь параметры и введи пароль заново.")
     while True:
         print("\nПодключение к MySQL. Enter — значение в скобках; :q — выход.")
-        host = prompt_default("IP / имя сервера", host)
+        profile["host"] = prompt_default("IP / имя сервера", profile["host"])
         while True:
-            raw_port = compact_number(str(prompt_default("Порт", port)))
+            raw_port = compact_number(str(prompt_default("Порт", profile["port"])))
             if raw_port.isascii() and raw_port.isdecimal() and 1 <= int(raw_port) <= 65535:
-                port = int(raw_port)
+                profile["port"] = int(raw_port)
                 break
             print("Порт должен быть числом от 1 до 65535.")
-        user = prompt_default("Пользователь MySQL", user)
-        password = prompt_database_password()
+        profile["user"] = prompt_default("Пользователь MySQL", profile["user"])
+        profile["database"] = prompt_default("База данных", profile["database"])
+        profile["password"] = prompt_database_password()
         try:
-            return pymysql.connect(
-                host=host, port=port, user=user, password=password, database=DATABASE_NAME,
-                charset="utf8mb4", cursorclass=DictCursor, autocommit=True,
-                connect_timeout=SETTINGS["database"]["connect_timeout"],
-                read_timeout=SETTINGS["database"]["read_timeout"],
-                write_timeout=SETTINGS["database"]["write_timeout"],
-            )
+            connection = open_database(profile)
         except UnicodeError:
             print("Не удалось обработать символы пароля. Проверь раскладку и повтори подключение.")
-        except pymysql.MySQLError as error:
+            continue
+        except (pymysql.MySQLError, OSError) as error:
             print_sql_error(error)
             if read_input("Enter — повторить подключение; :q — выход: "):
                 print("Введи параметры подключения ещё раз.")
+            continue
+        try:
+            store.save(profile)
+        except (OSError, ValueError):
+            print("Подключено, но сохранить параметры не удалось. Следующий запуск может использовать прежний вход или запросить параметры.")
+        else:
+            print("Подключение сохранено для автоматического входа при следующем запуске.")
+            if os.name != "nt":
+                print("На этой ОС пароль хранится в личном файле с правами 0600, без шифрования.")
+        return connection
 
 
 def print_sql_error(error):
@@ -1000,7 +1060,7 @@ def print_sql_error(error):
     if code in (1142, 1143, 1370):
         print("Нужны SELECT на main, locks, lock_access; INSERT/DELETE на main; UPDATE нужных полей main и locks.description; DELETE на locks и lock_access; EXECUTE на setLockAccess и changeId.")
     elif code == 1305:
-        print(f"Проверь наличие setLockAccess и changeId в базе {DATABASE_NAME}.")
+        print("Проверь наличие setLockAccess и changeId в подключённой базе.")
 
 
 def main():
@@ -1008,20 +1068,43 @@ def main():
     connection = None
     try:
         print(f"CYBERWALL - менеджмент для мастеров (v{VERSION})")
-        connection = connect_interactively()
-        db = Database(connection)
-        db.check_read_access()
-        recover_pending_id(db)
-        print("Подключено. Изменения выполняются только после подтверждения.")
         CONSOLE = CardConsole(READER_ENABLED)
-        print("Карта выбирает аккаунт только в поиске и списке кандидатов.")
-        print("USB считыватель можно подключить во время работы, все другие программы работающие со считывателем должны быть закрыты.")
-        if READER_ENABLED and READER_IMPORT_ERROR:
-            print(f"Модуль считывателя недоступен: {clean(READER_IMPORT_ERROR)}. Ручной поиск работает.")
+        store = ConnectionStore()
+        automatic, defaults = True, None
         while True:
-            selected = choose_candidate(db)
-            if selected is not None:
-                inspect_entity(db, selected)
+            connection = connect_interactively(automatic=automatic, defaults=defaults, store=store)
+            db = Database(connection)
+            scope = database_scope(db)
+            print(f"Подключено: {clean(connection.user)}@{clean(scope['host'])}:{scope['port']} / {clean(scope['database'])}.")
+            print("Изменения выполняются только после подтверждения.")
+            print("Карта выбирает аккаунт только в поиске и списке кандидатов.")
+            print("USB считыватель можно подключить во время работы, все другие программы работающие со считывателем должны быть закрыты.")
+            if READER_ENABLED and READER_IMPORT_ERROR:
+                print(f"Модуль считывателя недоступен: {clean(READER_IMPORT_ERROR)}. Ручной поиск работает.")
+            try:
+                try:
+                    recover_pending_id(db)
+                except WriteUncertain as error:
+                    print(clean(error))
+                    while True:
+                        command = read_input(":disconnect — Отключиться от БД; :q — выход: ")
+                        if command.lower() == ":disconnect":
+                            raise DisconnectRequested
+                while True:
+                    selected = choose_candidate(db)
+                    if selected is not None:
+                        inspect_entity(db, selected)
+            except DisconnectRequested:
+                defaults = {**scope, "user": connection.user}
+                connection.close()
+                connection = None
+                CONSOLE.histories.clear()
+                try:
+                    store.clear()
+                except OSError:
+                    print("Не удалось удалить сохранённое подключение: при следующем запуске возможен вход с прежними параметрами.")
+                print("Отключено от БД. Введи параметры нового подключения.")
+                automatic = False
     except (QuitRequested, EOFError, KeyboardInterrupt):
         print("\nРабота завершена.")
         return 0

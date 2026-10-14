@@ -5,13 +5,13 @@ from dataclasses import dataclass
 from contextlib import contextmanager
 import os
 import queue
-import select
 import shutil
 import sys
 import threading
 import time
 
 from .settings import SETTINGS, app_path
+from .input_history import HistoryCursor
 
 READER_SETTINGS = SETTINGS["reader"]
 READER_IMPORT_ERROR = None
@@ -46,6 +46,7 @@ class ScannedCard:
 class CardConsole:
     def __init__(self, enabled=True):
         self.enabled = enabled and rfid is not None
+        self.histories = {}
         self.events = queue.Queue()
         self.condition = threading.Condition()
         self.io_lock = threading.Lock()
@@ -146,31 +147,40 @@ class CardConsole:
             if current == epoch:
                 return value
 
-    def read(self, prompt, allow_card=False):
-        # input() работает даже без терминала, HID и самого модуля считывателя.
-        if not allow_card or not self.enabled or not sys.stdin.isatty():
-            return input(prompt)
-        epoch = self._start_scan()
+    def read(self, prompt, allow_card=False, history=None):
+        # История только в памяти; None полностью отключает её для этого поля.
+        entries = self.histories.setdefault(history, []) if history is not None else None
+        epoch = self._start_scan() if allow_card and self.enabled and sys.stdin.isatty() else None
         try:
-            if os.name == "nt":
-                return self._windows_read(prompt, epoch)
-            return self._posix_read(prompt, epoch)
+            if not sys.stdin.isatty():
+                value = input(prompt)
+            elif os.name == "nt":
+                value = self._windows_read(prompt, epoch, entries)
+            else:
+                value = self._posix_read(prompt, epoch, entries)
+            if isinstance(value, str) and entries is not None and value.strip():
+                if not entries or entries[-1] != value:
+                    entries.append(value)
+                    del entries[:-100]
+            return value
         finally:
-            self._stop_scan()
+            if epoch is not None:
+                self._stop_scan()
 
-    def _windows_read(self, prompt, epoch):
+    def _windows_read(self, prompt, epoch, entries=None):
         from .windows_console import WindowsConsoleInput
         try:
             keyboard = WindowsConsoleInput()
-        except OSError as error:
+        except OSError:
             self._stop_scan()
-            print(f"Автоввод карты в этой консоли недоступен: {error}. Введи поиск вручную.")
+            print("Расширенный ввод в этой консоли недоступен. Введи строку вручную.")
             return input(prompt)
         with keyboard:
-            return self._windows_edit(prompt, epoch, keyboard)
+            return self._windows_edit(prompt, epoch, keyboard, entries)
 
-    def _windows_edit(self, prompt, epoch, keyboard):
+    def _windows_edit(self, prompt, epoch, keyboard, entries=None):
         chars = []
+        history = HistoryCursor(entries or [])
         position = 0
         print(prompt)
         previous_width = 0
@@ -209,7 +219,11 @@ class CardConsole:
                     raise EOFError
                 for _ in range(min(key.repeat, 4096)):
                     before = position
-                    if key.key == 37:
+                    if key.key in (38, 40):
+                        chars = list(history.move(-1 if key.key == 38 else 1, "".join(chars)))
+                        position = len(chars)
+                        changed = True
+                    elif key.key == 37:
                         position = max(0, position - 1)
                     elif key.key == 39:
                         position = min(len(chars), position + 1)
@@ -228,7 +242,7 @@ class CardConsole:
                         chars.insert(position, char)
                         position += 1
                     changed = changed or before != position
-            event = self._event(epoch)
+            event = self._event(epoch) if epoch is not None else None
             if isinstance(event, ScannedCard):
                 print(f"\nПрочитана карта: card_id {event.number}")
                 return event
@@ -240,24 +254,10 @@ class CardConsole:
                 redraw()  # Максимум одна перерисовка за цикл, а не на каждый символ.
             time.sleep(0.02)
 
-    def _posix_read(self, prompt, epoch):
-        import termios
-        print(prompt, end="", flush=True)
-        while True:
-            ready, _, _ = select.select([sys.stdin], [], [], 0.05)
-            if ready:
-                line = sys.stdin.readline()
-                if not line:
-                    raise EOFError
-                return line.rstrip("\n")
-            event = self._event(epoch)
-            if isinstance(event, ScannedCard):
-                termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
-                print(f"\nПрочитана карта: card_id {event.number}")
-                return event
-            if event is not None:
-                print("\n" + event)
-                print(prompt, end="", flush=True)
+    def _posix_read(self, prompt, epoch, entries=None):
+        from .posix_console import PosixConsoleInput
+        with PosixConsoleInput() as keyboard:
+            return self._windows_edit(prompt, epoch, keyboard, entries)
 
     def write_number(self, number, beep_t=10):
         if not self.enabled:
