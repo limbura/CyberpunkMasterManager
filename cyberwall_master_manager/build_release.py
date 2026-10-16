@@ -47,7 +47,8 @@ def printer_packaging_arguments(timini, manifest):
             "--add-data", f"{timini / 'timiniprint/data'}{os.pathsep}timiniprint/data",
             "--collect-all", "cyberwall_id_printer", "--collect-all", "bleak",
             "--collect-all", "winrt", "--collect-all", "pypdfium2", "--collect-all", "pypdfium2_raw",
-            "--collect-submodules", "PIL", "--hidden-import", "tomlkit"]
+            "--collect-submodules", "PIL", "--collect-submodules", "serial",
+            "--hidden-import", "tomlkit"]
     for package in ("devices", "printing", "protocol", "raster", "rendering", "transport"):
         args += ["--collect-submodules", "timiniprint." + package]
     return args
