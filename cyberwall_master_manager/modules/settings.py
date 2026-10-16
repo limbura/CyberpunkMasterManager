@@ -2,6 +2,7 @@
 from pathlib import Path
 import tomllib
 import sys
+from .printer_settings import printer_settings
 
 def application_directory():
     """В EXE настройки и журнал лежат рядом с EXE, не в _internal."""
@@ -48,6 +49,7 @@ def load_settings(path=APP_DIR / "config.toml"):
                 raise ValueError(f"В config.toml [{section}] {key}: непустая строка.")
     if (APP_DIR / config["state"]["batch_cards_file"]).resolve() == (APP_DIR / config["state"]["pending_id_file"]).resolve():
         raise ValueError("Журналы batch_cards_file и pending_id_file должны быть разными файлами.")
+    config["printer"] = printer_settings(config.get("printer", {}))
     return config
 
 

@@ -67,9 +67,9 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(application_directory(), Path.cwd())
 
     def test_portable_config_preserves_values_and_localizes_state(self):
-        source = (build.APP_DIR / 'config.toml').read_text(encoding="utf-8").replace('127.0.0.1', '192.168.1.20').replace('"pending_id_change.json"', '"D:/private/pending.json"')
+        source = (build.APP_DIR / 'config.toml').read_text(encoding="utf-8").replace('"pending_id_change.json"', '"D:/private/pending.json"')
         result = tomllib.loads(build.portable_config(source))
-        self.assertEqual(result['database']['host'], '192.168.1.20')
+        self.assertEqual(result['database']['host'], tomllib.loads(source)['database']['host'])
         self.assertEqual(result['reader']['library_path'], 'bundled')
         self.assertEqual(result['state']['pending_id_file'], 'pending_id_change.json')
         self.assertEqual(result['state']['batch_cards_file'], 'batch_cards.json')

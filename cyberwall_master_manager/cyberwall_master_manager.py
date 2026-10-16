@@ -14,7 +14,9 @@ import json
 import os
 import unicodedata
 from pathlib import Path
-from modules.settings import SETTINGS, app_path
+from modules.settings import SETTINGS, APP_DIR, app_path
+from modules.thermal_printer import ThermalPrinterService
+from modules import printer_menu
 from modules.card_console import CardConsole, ScannedCard, CardNotPresentError, READER_IMPORT_ERROR
 from modules.account_fields import validate_name, NAME_RULES, LABELS, column_hint, parse_column, editable_columns, validate_column
 from modules import batch_cards
@@ -37,9 +39,10 @@ PAGE_SIZE = SETTINGS["interface"]["page_size"]
 READER_ENABLED = SETTINGS["reader"]["enabled"]
 WRITE_BEEP_T = SETTINGS["reader"]["write_beep_t"]
 PENDING_ID_PATH = app_path(SETTINGS["state"]["pending_id_file"])
-VERSION = "2.4.0"
+VERSION = "2.5.0"
 BATCH_PATH = app_path(SETTINGS["state"]["batch_cards_file"])
 CONSOLE = None
+THERMAL_PRINTER = None
 ACCOUNT_COLUMNS = "id, card_id, name, money, losa, netrunner_lvl, police"
 EDIT_FIELDS = {"name": "имя", "money": "деньги", "losa": "рейт",
                "netrunner_lvl": "ур. деки", "police": "полиц. права", "password": "пароль"}
@@ -509,8 +512,15 @@ def choose_candidate(db, kind=None):
             print(":disconnect — Отключиться от БД")
             print(":new — создать новый аккаунт")
             print(":batch — пакетная запись карт / продолжить работу")
+            print(":templates — печать шаблонов")
+            print(":printer — термопринтер: подключение и калибровка")
+            printer_menu.show_status(THERMAL_PRINTER)
         text = read_input("Строка [Enter — все, :b — назад, :q — выход]: ", allow_card,
                           history=f"search:{kind or 'all'}")
+        if kind is None and isinstance(text, str) and text.lower() in (":templates", ":printer"):
+            action = printer_menu.templates if text.lower() == ":templates" else printer_menu.printer_menu
+            action(THERMAL_PRINTER, read_input)
+            continue
         if kind is None and isinstance(text, str) and text.lower() == ":disconnect":
             raise DisconnectRequested
         if kind is None and isinstance(text, str) and text.lower() == ":batch":
@@ -910,6 +920,8 @@ def inspect_entity(db, selected):
             print("10 — изменить ID (наклейку)")
             print("11 — записать карту (card_id)")
             print("12 — удалить аккаунт")
+            print("13 — напечатать ID и имя")
+            print("14 — напечатать только ID")
         else:
             print("4 — изменить описание замка")
             print("5 — удалить замок")
@@ -960,6 +972,15 @@ def inspect_entity(db, selected):
                 if not db.connection.open or (error.args and error.args[0] in (2006, 2013, 2055)):
                     raise
                 print_sql_error(error)
+        elif selected.kind == "account" and command in ("13", "14"):
+            # Refresh once more at the actual print action; account number may have changed.
+            try:
+                current = db.refresh(selected)
+                printer_menu.print_label(THERMAL_PRINTER, str(current.number).zfill(9),
+                    current.label if command == "13" else None,
+                    mode="id-name" if command == "13" else "id-only")
+            except SelectionChanged as error:
+                print(clean(error))
         elif command == "n":
             page = min(page + 1, pages - 1)
         elif command == "p":
@@ -1064,11 +1085,13 @@ def print_sql_error(error):
 
 
 def main():
-    global CONSOLE
+    global CONSOLE, THERMAL_PRINTER
     connection = None
     try:
         print(f"CYBERWALL - менеджмент для мастеров (v{VERSION})")
         CONSOLE = CardConsole(READER_ENABLED)
+        THERMAL_PRINTER = ThermalPrinterService(SETTINGS['printer'], APP_DIR / 'config.toml')
+        THERMAL_PRINTER.start()
         store = ConnectionStore()
         automatic, defaults = True, None
         while True:
@@ -1121,6 +1144,9 @@ def main():
         print("Работа остановлена. После восстановления связи запусти скрипт снова.")
         return 1
     finally:
+        if THERMAL_PRINTER is not None:
+            THERMAL_PRINTER.close()
+            THERMAL_PRINTER = None
         if CONSOLE is not None:
             CONSOLE.close()
             CONSOLE = None
