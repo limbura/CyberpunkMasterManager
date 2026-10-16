@@ -195,13 +195,38 @@ class SettingsAndMenuTests(unittest.TestCase):
         import cyberwall_master_manager as app
         old = app.Entity('account', 123456789, 'Старое имя', card_id=999)
         fresh = app.Entity('account', 987654321, 'Новое имя', card_id=999)
-        for command, mode, name in [('13', 'id-name', 'Новое имя'), ('14', 'id-only', None)]:
+        for command, mode, name in [('1', 'id-name', 'Новое имя'), ('2', 'id-only', None)]:
             db = Mock()
             db.refresh.side_effect = [old, fresh, fresh]
             db.access_table.return_value = []
             with patch.object(app, 'recover_pending_id'), \
-                 patch.object(app, 'read_input', side_effect=[command, '0']), \
+                 patch.object(app, 'read_input', side_effect=['13', command, '0']), \
                  patch.object(app.printer_menu, 'print_label') as printing, \
                  contextlib.redirect_stdout(io.StringIO()):
                 app.inspect_entity(db, old)
             printing.assert_called_once_with(app.THERMAL_PRINTER, '987654321', name, mode=mode)
+
+    def test_print_submenu_cancel_never_prints(self):
+        import cyberwall_master_manager as app
+        account = app.Entity('account', 123456789, 'Имя', card_id=999)
+        db = Mock()
+        db.refresh.return_value = account
+        db.access_table.return_value = []
+        with patch.object(app, 'recover_pending_id'), \
+             patch.object(app, 'read_input', side_effect=['13', '0', '0']), \
+             patch.object(app.printer_menu, 'print_label') as printing, \
+             contextlib.redirect_stdout(io.StringIO()):
+            app.inspect_entity(db, account)
+        printing.assert_not_called()
+
+    def test_common_menu_routes_numeric_actions(self):
+        import cyberwall_master_manager as app
+        db = Mock()
+        with patch.object(app, 'read_input', side_effect=[':menu', '3', '4', '0', ':b']), \
+             patch.object(app.printer_menu, 'templates') as templates, \
+             patch.object(app.printer_menu, 'printer_menu') as devices, \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertIsNone(app.choose_candidate(db))
+        templates.assert_called_once()
+        devices.assert_called_once()
+        db.search.assert_not_called()

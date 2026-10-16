@@ -312,14 +312,14 @@ def process(db, journal, reader, ask=input, beep_t=10):
             message = ""
             continue
         header(journal, row, message)
-        command = ask("ID с наклейки / команда: ").strip()
+        command = ask("ID с наклейки или команда: ").strip()
         lower = command.lower()
         message = ""
         if lower in (":b", ":q"):
             return
         if lower in (":report", ":skipped"):
             report(journal, lower == ":skipped")
-            command = ask("card_id для перехода / Enter — назад: ").strip()
+            command = ask("card_id для перехода [Enter — назад]: ").strip()
             if not command:
                 continue
             lower = ":card " + command
@@ -377,7 +377,7 @@ def run(db, console, path, scope, *, ask=input, beep_t=10):
             clear_screen()
             print("ПАКЕТНАЯ ЗАПИСЬ КАРТ")
             print("1 — продолжить работу" if journal else "Сохранённой работы нет.")
-            print("2 — начать новую работу; :b — назад")
+            print("2 — начать новую работу\n0, Enter, :b — назад")
             choice = ask("Действие: ").strip().lower()
             if choice == "1" and journal:
                 pass

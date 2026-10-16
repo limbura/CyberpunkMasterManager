@@ -153,3 +153,32 @@ class ReleaseTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PrinterBundleTests(unittest.TestCase):
+    def test_portable_config_discards_external_paths_and_selected_device(self):
+        source = (build.APP_DIR/'config.toml').read_text(encoding='utf-8')
+        source = source.replace('address = ""', 'address = "AA:BB:CC"')
+        doc = tomllib.loads(build.portable_config(source))
+        self.assertEqual(doc['printer']['address'], '')
+        self.assertEqual(doc['printer']['library_path'], 'bundled')
+        self.assertEqual(doc['printer']['timini_path'], 'bundled')
+        self.assertEqual(doc['printer']['paper']['width_mm'], 40)
+
+    def test_build_rejects_wrong_or_dirty_timini_before_packaging(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            library = root/'printer'; backend = library/'src/cyberwall_id_printer/backends'
+            backend.mkdir(parents=True)
+            (backend/'timini.py').write_text('TIMINI_REVISION = "expected"')
+            upstream = root/'engine'; (upstream/'timiniprint/data').mkdir(parents=True)
+            (upstream/'timiniprint/data/printer_profiles.json').write_text('{}')
+            for rev, dirty in [('wrong',''), ('expected',' M file')]:
+                with patch.object(build, 'run', side_effect=[SimpleNamespace(stdout=rev),SimpleNamespace(stdout=dirty)]):
+                    with self.assertRaisesRegex(ValueError, 'чистый'):
+                        build.resolve_printer_sources(library, upstream)
+
+    def test_self_test_environment_removes_external_timini_override(self):
+        with patch.dict(os.environ, {'CYBERWALL_TIMINI_PATH':'C:/private/source'}):
+            self.assertNotIn('CYBERWALL_TIMINI_PATH', build.clean_runtime_environment())

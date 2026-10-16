@@ -169,7 +169,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_search_new_returns_created_account(self):
         db = self.fake_db()
-        with patch.object(app, "read_input", return_value=":new"), patch.object(app, "create_account", return_value=ACCOUNT):
+        with patch.object(app, "read_input", side_effect=[":menu", "1"]), patch.object(app, "create_account", return_value=ACCOUNT):
             self.assertEqual(app.choose_candidate(db), ACCOUNT)
         db.search.assert_not_called()
 

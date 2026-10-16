@@ -39,7 +39,7 @@ PAGE_SIZE = SETTINGS["interface"]["page_size"]
 READER_ENABLED = SETTINGS["reader"]["enabled"]
 WRITE_BEEP_T = SETTINGS["reader"]["write_beep_t"]
 PENDING_ID_PATH = app_path(SETTINGS["state"]["pending_id_file"])
-VERSION = "2.5.0"
+VERSION = "2.6.0"
 BATCH_PATH = app_path(SETTINGS["state"]["batch_cards_file"])
 CONSOLE = None
 THERMAL_PRINTER = None
@@ -501,47 +501,64 @@ def show_page(table, page):
     return total_pages
 
 
+def general_menu(db):
+    """One named entry point; all common actions use numeric choices."""
+    while True:
+        print("\nОБЩЕЕ МЕНЮ")
+        print("1 — создать аккаунт")
+        print("2 — пакетная запись карт (новая работа или продолжение)")
+        print("3 — печать шаблонов")
+        print("4 — термопринтер")
+        print("5 — отключиться от БД")
+        print("6 — выход из программы")
+        print("0, Enter, :b — назад")
+        choice = read_input("Пункт меню: ", history="menu:general").lower()
+        if choice in ("", "0", ":b"):
+            return None
+        if choice == "5":
+            raise DisconnectRequested
+        if choice == "6":
+            raise QuitRequested
+        try:
+            if choice == "1":
+                created = create_account(db)
+                if created is not None:
+                    return created
+            elif choice == "2":
+                if CONSOLE is None:
+                    raise RuntimeError("Считыватель не инициализирован.")
+                batch_cards.run(db, CONSOLE, BATCH_PATH, database_scope(db),
+                                beep_t=WRITE_BEEP_T, ask=CONSOLE.read)
+            elif choice == "3":
+                printer_menu.templates(THERMAL_PRINTER, read_input)
+            elif choice == "4":
+                printer_menu.printer_menu(THERMAL_PRINTER, read_input)
+            else:
+                print("Введи номер пункта меню.")
+        except (SelectionChanged, ValueError, batch_cards.BatchError, RuntimeError) as error:
+            print(clean(error))
+        except pymysql.MySQLError as error:
+            if not db.connection.open or (error.args and error.args[0] in (2006, 2013, 2055)):
+                raise
+            print_sql_error(error)
+
+
 def choose_candidate(db, kind=None):
     title = {None: "аккаунтов и замков", "account": "аккаунтов", "lock": "замков"}[kind]
     allow_card = kind != "lock"
     while True:
-        print(f"\nПоиск {title}: имя / описание / номер или его часть.")
+        print(f"\nПоиск {title}: имя, описание, номер или его часть.")
         if allow_card:
             print("Можно просто приложить карту аккаунта (повторно — убрать и приложить).")
         if kind is None:
-            print(":disconnect — Отключиться от БД")
-            print(":new — создать новый аккаунт")
-            print(":batch — пакетная запись карт / продолжить работу")
-            print(":templates — печать шаблонов")
-            print(":printer — термопринтер: подключение и калибровка")
+            print(":menu — общее меню")
             printer_menu.show_status(THERMAL_PRINTER)
-        text = read_input("Строка [Enter — все, :b — назад, :q — выход]: ", allow_card,
+        text = read_input("Строка [Enter — все; :b — назад; :q — выход]: ", allow_card,
                           history=f"search:{kind or 'all'}")
-        if kind is None and isinstance(text, str) and text.lower() in (":templates", ":printer"):
-            action = printer_menu.templates if text.lower() == ":templates" else printer_menu.printer_menu
-            action(THERMAL_PRINTER, read_input)
-            continue
-        if kind is None and isinstance(text, str) and text.lower() == ":disconnect":
-            raise DisconnectRequested
-        if kind is None and isinstance(text, str) and text.lower() == ":batch":
-            try:
-                if CONSOLE is None:
-                    raise RuntimeError("Считыватель не инициализирован.")
-                batch_cards.run(db, CONSOLE, BATCH_PATH, database_scope(db), beep_t=WRITE_BEEP_T, ask=CONSOLE.read)
-            except (batch_cards.BatchError, RuntimeError) as error:
-                print(clean(error))
-            continue
-        if kind is None and isinstance(text, str) and text.lower() == ":new":
-            try:
-                created = create_account(db)
-                if created is not None:
-                    return created
-            except (SelectionChanged, ValueError) as error:
-                print(clean(error))
-            except pymysql.MySQLError as error:
-                if not db.connection.open or (error.args and error.args[0] in (2006, 2013, 2055)):
-                    raise
-                print_sql_error(error)
+        if kind is None and isinstance(text, str) and text.lower() == ":menu":
+            created = general_menu(db)
+            if created is not None:
+                return created
             continue
         if isinstance(text, ScannedCard):
             selected = db.account_by_card(text.number)
@@ -560,7 +577,7 @@ def choose_candidate(db, kind=None):
         while True:
             pages = show_page(lines, page)
             command = read_input(
-                "Номер кандидата; n/p — страницы; Enter — другой поиск; :b — назад: ", allow_card,
+                "Номер кандидата; n — следующая страница; p — предыдущая страница; Enter — другой поиск; :b — назад: ", allow_card,
                 history=f"candidates:{kind or 'all'}"
             )
             if isinstance(command, ScannedCard):
@@ -593,7 +610,7 @@ def change_access(db, selected, grant):
     action = "НАЗНАЧИТЬ ДОСТУП" if grant else "ОТОЗВАТЬ ДОСТУП"
     print(f"\n{action}")
     show_page(make_entity_table([account, lock]), 0)
-    if read_input("Применить? [да / Enter — отмена]: ").lower() not in ("да", "д", "yes", "y"):
+    if read_input("Применить? [да — подтвердить; Enter — отмена]: ").lower() not in ("да", "д", "yes", "y"):
         print("Отменено.")
         return
     code = db.set_access(lock.number, account.card_id, grant)
@@ -629,7 +646,7 @@ def display_field(field, value):
 
 def create_account(db):
     print("\nСОЗДАТЬ НОВЫЙ АККАУНТ")
-    print("card_id и ID создаёт БД автоматически. :b — отмена, :q — выход.")
+    print("card_id и ID создаёт БД автоматически. :b — отмена; :q — выход.")
     columns = db.account_schema()
     values = {}
     for column in columns:
@@ -653,7 +670,7 @@ def create_account(db):
     print("\nПРОВЕРЬ ДАННЫЕ НОВОГО АККАУНТА")
     for field, value in values.items():
         print(f"{LABELS.get(field, field)}: {display_field(field, value)}")
-    if read_input("Создать аккаунт? [да / Enter — отмена]: ").lower() not in ("да", "д", "yes", "y"):
+    if read_input("Создать аккаунт? [да — подтвердить; Enter — отмена]: ").lower() not in ("да", "д", "yes", "y"):
         print("Создание отменено. Запись не добавлена.")
         return None
     created = db.create_account(values)
@@ -671,7 +688,7 @@ def edit_lock_description(db, selected):
     print(column_hint(column, defaults=False))
     print("Ограничения имени аккаунта по словам и длине слов здесь не применяются.")
     while True:
-        raw = read_input("Новое описание [Enter / :b — назад, :empty — пустая строка]: ", history="lock:description")
+        raw = read_input("Новое описание [Enter, :b — назад; :empty — пустая строка]: ", history="lock:description")
         if raw.lower() in ("", ":b"):
             return
         try:
@@ -683,7 +700,7 @@ def edit_lock_description(db, selected):
         print("Значение не изменилось.")
         return
     print(f"Описание: {clean(selected.label)} → {clean(value)}")
-    if read_input("Применить? [да / Enter — отмена]: ").lower() not in ("да", "д", "yes", "y"):
+    if read_input("Применить? [да — подтвердить; Enter — отмена]: ").lower() not in ("да", "д", "yes", "y"):
         return
     db.set_lock_description(selected, value)
     print("ГОТОВО: описание замка сохранено.")
@@ -700,7 +717,7 @@ def delete_entity(db, selected):
     if is_account:
         print("Физическая карта не стирается. Программа не удаляет историю logs и реестр выданных ID.")
     while True:
-        raw = read_input(f"Для удаления введи {key} {format_number(selected.number)} [Enter / :b — отмена]: ")
+        raw = read_input(f"Для удаления введи {key} {format_number(selected.number)} [Enter, :b — отмена]: ")
         if raw.lower() in ("", ":b"):
             print("Удаление отменено.")
             return False
@@ -727,7 +744,7 @@ def edit_account_field(db, selected, field):
         print("Вводится новый итоговый баланс, а не сумма прибавления или списания.")
     while True:
         # Пароль не strip(): пробелы и ведущие нули должны сохраниться буквально.
-        raw = raw_input("Новое значение [Enter / :b — назад, :q — выход]: ",
+        raw = raw_input("Новое значение [Enter, :b — назад; :q — выход]: ",
                         history=None if field == "password" else "field:" + field)
         command = raw.lower()
         if command == ":q":
@@ -754,7 +771,7 @@ def edit_account_field(db, selected, field):
         print("Значение не изменилось.")
         return
     print(f"Изменить «{EDIT_FIELDS[field]}»: {display_field(field, current)} → {display_field(field, value)}")
-    if read_input("Применить? [да / Enter — отмена]: ").lower() not in ("да", "д", "yes", "y"):
+    if read_input("Применить? [да — подтвердить; Enter — отмена]: ").lower() not in ("да", "д", "yes", "y"):
         print("Отменено.")
         return
     db.set_field(selected.card_id, field, current, value)
@@ -800,7 +817,7 @@ def confirm_sticker(db, pending):
     print(f"Напиши на наклейке ID: {format_number(number)}")
     while True:
         try:
-            raw = read_input("После изменения наклейки введи написанный ID (:disconnect — отключиться, :q — выход): ")
+            raw = read_input("После изменения наклейки введи написанный ID (:disconnect — отключиться; :q — выход): ")
             if raw.lower() == ":disconnect":
                 raise DisconnectRequested
         except KeyboardInterrupt:
@@ -836,7 +853,7 @@ def change_account_id(db, selected):
     print("\n" + entity_text(selected))
     print("ВНИМАНИЕ: после подтверждения будет сгенерирован новый ID.")
     print("Новый ID нужно обязательно написать на наклейке карты и подтвердить это в программе.")
-    if read_input("Сгенерировать новый ID? [да / Enter / :b — назад]: ").lower() not in ("да", "д", "yes", "y"):
+    if read_input("Сгенерировать новый ID? [да — подтвердить; Enter, :b — назад]: ").lower() not in ("да", "д", "yes", "y"):
         return
     if PENDING_ID_PATH.exists():
         recover_pending_id(db)
@@ -868,7 +885,7 @@ def write_account_card(db, selected):
     print("Прежний номер будет заменен.")
     print("Приложи одну карту к считывателю.")
     print("Не убирай и не меняй карту до сообщения о результате.")
-    if read_input("Записать? [да / Enter / :b — отмена]: ").lower() not in ("да", "д", "yes", "y"):
+    if read_input("Записать? [да — подтвердить; Enter, :b — отмена]: ").lower() not in ("да", "д", "yes", "y"):
         return
     selected = db.refresh(selected)
     try:
@@ -920,20 +937,22 @@ def inspect_entity(db, selected):
             print("10 — изменить ID (наклейку)")
             print("11 — записать карту (card_id)")
             print("12 — удалить аккаунт")
-            print("13 — напечатать ID и имя")
-            print("14 — напечатать только ID")
+            print("13 — печать наклейки ID")
         else:
             print("4 — изменить описание замка")
             print("5 — удалить замок")
-        print("0 / Enter — новый поиск")
-        print(":disconnect — Отключиться от БД")
+        print("0, Enter, :b — новый поиск")
+        print(":menu — общее меню")
         print(":q — выход")
         if pages > 1:
             print("n — следующая страница")
             print("p — предыдущая страница")
         command = read_input("Действие: ", history="menu:" + selected.kind).lower()
-        if command == ":disconnect":
-            raise DisconnectRequested
+        if command == ":menu":
+            created = general_menu(db)
+            if created is not None:
+                selected, page = created, 0
+            continue
         if command in ("", "0", ":b"):
             return
         if command in ("1", "2"):
@@ -972,13 +991,14 @@ def inspect_entity(db, selected):
                 if not db.connection.open or (error.args and error.args[0] in (2006, 2013, 2055)):
                     raise
                 print_sql_error(error)
-        elif selected.kind == "account" and command in ("13", "14"):
+        elif selected.kind == "account" and command == "13":
             # Refresh once more at the actual print action; account number may have changed.
             try:
-                current = db.refresh(selected)
-                printer_menu.print_label(THERMAL_PRINTER, str(current.number).zfill(9),
-                    current.label if command == "13" else None,
-                    mode="id-name" if command == "13" else "id-only")
+                mode = printer_menu.choose_label_mode(read_input)
+                if mode is not None:
+                    current = db.refresh(selected)
+                    printer_menu.print_label(THERMAL_PRINTER, str(current.number).zfill(9),
+                        current.label if mode == "id-name" else None, mode=mode)
             except SelectionChanged as error:
                 print(clean(error))
         elif command == "n":
@@ -1042,7 +1062,7 @@ def connect_interactively(*, automatic=True, defaults=None, store=None):
                 print("Автоматическое подключение не удалось. Проверь параметры и введи пароль заново.")
     while True:
         print("\nПодключение к MySQL. Enter — значение в скобках; :q — выход.")
-        profile["host"] = prompt_default("IP / имя сервера", profile["host"])
+        profile["host"] = prompt_default("IP или имя сервера", profile["host"])
         while True:
             raw_port = compact_number(str(prompt_default("Порт", profile["port"])))
             if raw_port.isascii() and raw_port.isdecimal() and 1 <= int(raw_port) <= 65535:

@@ -58,7 +58,7 @@ class ThermalPrinterService:
             raise RuntimeError('Обнови cyberwall_id_printer до версии 0.3.0 или новее.')
         paper = dict(self.settings['paper'])
         paper['paper_type'] = paper.pop('type')
-        path = self.settings['timini_path']
+        path = '' if getattr(sys, 'frozen', False) else self.settings['timini_path']
         backend = api.TiMiniBackend(
             (self.config_path.parent / path).resolve() if path else None,
             blackening=self.settings['blackening'], timeout=self.settings['scan_timeout_seconds'])

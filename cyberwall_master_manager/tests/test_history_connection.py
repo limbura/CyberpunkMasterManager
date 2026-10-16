@@ -90,7 +90,7 @@ class HistoryTests(unittest.TestCase):
     def test_batch_entry_uses_console_without_history(self):
         db, console = Mock(), Mock()
         with patch.object(app, 'CONSOLE', console), patch.object(app, 'database_scope', return_value={}), \
-             patch.object(app, 'read_input', side_effect=[':batch', ':b']), patch.object(app.batch_cards, 'run') as run:
+             patch.object(app, 'read_input', side_effect=[':menu', '2', '0', ':b']), patch.object(app.batch_cards, 'run') as run:
             app.choose_candidate(db)
         self.assertEqual(run.call_args.kwargs['ask'], console.read)
 
@@ -292,7 +292,7 @@ class ConnectionTests(unittest.TestCase):
 
     def test_search_disconnect_does_not_query_db(self):
         db = Mock()
-        with patch.object(app, 'read_input', return_value=':disconnect'):
+        with patch.object(app, 'read_input', side_effect=[':menu', '5']):
             with self.assertRaises(app.DisconnectRequested): app.choose_candidate(db)
         db.search.assert_not_called()
 

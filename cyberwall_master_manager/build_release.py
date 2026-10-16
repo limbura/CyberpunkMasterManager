@@ -21,6 +21,38 @@ APP_DIR = Path(__file__).resolve().parent
 APP_NAME = "cyberwall_master_manager"
 PYINSTALLER_REQUIREMENT = "PyInstaller>=6.16,<7"
 
+
+def resolve_printer_sources(printer=None, timini=None, *, app_dir=None):
+    app_dir = Path(app_dir or APP_DIR)
+    config = tomllib.loads((app_dir / "config.toml").read_text(encoding="utf-8"))
+    settings = config.get("printer", {})
+    printer = Path(printer).expanduser().resolve() if printer is not None else (app_dir / settings.get("library_path", "../../CyberpunkIdPrinter")).resolve()
+    timini = Path(timini).expanduser().resolve() if timini is not None else (app_dir / settings.get("timini_path", "../../TiMini-Print")).resolve()
+    if not (printer / "src/cyberwall_id_printer/backends/timini.py").is_file():
+        raise ValueError("Не найдены исходники библиотеки печати. Укажи --printer.")
+    if not (timini / "timiniprint/data/printer_profiles.json").is_file():
+        raise ValueError("Не найдены исходники TiMini-Print. Укажи --timini.")
+    revision = read_version(printer / "src/cyberwall_id_printer/backends/timini.py", "TIMINI_REVISION")
+    actual = run(["git", "-C", timini, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    dirty = run(["git", "-C", timini, "status", "--porcelain", "--untracked-files=normal"], capture_output=True, text=True).stdout.strip()
+    if actual != revision or dirty:
+        raise ValueError(f"Для сборки нужен чистый TiMini-Print на ревизии {revision}.")
+    return printer, timini, revision
+
+
+def printer_packaging_arguments(timini, manifest):
+    # Explicit collections cover dynamic BLE/platform imports, namespace WinRT
+    # wheels, Pillow/native PDF dependencies and TiMini's JSON model catalog.
+    args = ["--paths", timini, "--add-data", f"{manifest}{os.pathsep}.",
+            "--add-data", f"{timini / 'timiniprint/data'}{os.pathsep}timiniprint/data",
+            "--collect-all", "cyberwall_id_printer", "--collect-all", "bleak",
+            "--collect-all", "winrt", "--collect-all", "pypdfium2", "--collect-all", "pypdfium2_raw",
+            "--collect-submodules", "PIL", "--hidden-import", "tomlkit"]
+    for package in ("devices", "printing", "protocol", "raster", "rendering", "transport"):
+        args += ["--collect-submodules", "timiniprint." + package]
+    return args
+
+
 USER_README = """CYBERWALL - менеджмент для мастеров
 Версия программы: {version}. Библиотека считывателя: {reader_version}.
 
@@ -28,7 +60,7 @@ USER_README = """CYBERWALL - менеджмент для мастеров
 2. При необходимости измени адрес БД, порт и пользователя в config.toml.
 3. Запусти cyberwall_master_manager.exe. При первом входе введи параметры БД и пароль.
 Следующие запуски подключаются автоматически. Для смены сервера, базы или пользователя:
-:disconnect — Отключиться от БД (в поиске и меню выбранной записи).
+:menu → 5 — отключиться от БД (в поиске и меню выбранной записи).
 Сохранённое подключение зашифровано Windows для текущего пользователя и хранится в
 %LOCALAPPDATA%/CYBERWALL/cyberwall_master_manager/connection.dat. Оно не входит в ZIP.
 При отключении сохранённый вход удаляется; новое успешное подключение заменяет его.
@@ -53,8 +85,14 @@ USB-считыватель опционален, подключать его м�
 считывателя продолжают работать. Для обновления встроенной библиотеки нужна новая сборка.
 
 Поиск: имя, описание, ID, card_id или часть номера. Enter — все записи.
-Карта выбирает аккаунт в поиске. :new — создать аккаунт, :b — назад, :q — выход.
-:batch — пакетная запись карт; «продолжить работу» восстанавливает прогресс.
+Карта выбирает аккаунт в поиске. :menu — общее цифровое меню; :b — назад; :q — выход.
+Общее меню: 1 — создать аккаунт; 2 — пакетная запись карт; 3 — шаблоны; 4 — термопринтер.
+В аккаунте: 13 — печать наклейки ID, затем выбор макета.
+Библиотека печати, TiMini, каталог устройств и Bluetooth-компоненты встроены.
+Git, Python, отдельные исходники и установка пакетов на целевом ПК не нужны.
+printer.library_path и printer.timini_path в EXE не используются.
+Для печати нужен Bluetooth-адаптер с работающим системным драйвером.
+Пакетная запись: «продолжить работу» восстанавливает прогресс.
 Подпиши наклейку, положи карту и введи ID с наклейки. Дождись проверки и убери карту.
 :skip — пропуск, :card N — переход к card_id, :id N — переход к ID, :report — итоги.
 Старые журналы batch_cards-*.json — архивы предыдущей работы; текущий — batch_cards.json.
@@ -143,23 +181,25 @@ def resolve_reader(reader=None, app_dir=None):
 
 
 def portable_config(source):
-    """Меняем только пути в копии; остальные пользовательские настройки сохраняются."""
-    if "batch_cards_file" not in tomllib.loads(source).get("state", {}):
-        source = re.sub(r"(?m)^\[state\]\s*$", '[state]\nbatch_cards_file = "batch_cards.json"', source, count=1)
-    for section, key, value in (("reader", "library_path", "bundled"),
-                                ("state", "pending_id_file", "pending_id_change.json"),
-                                ("state", "batch_cards_file", "batch_cards.json")):
-        pattern = rf'(?ms)(^\[{section}\]\s*\n(?:(?!^\[).)*?^{key}\s*=)[^\n]*'
-        source, count = re.subn(pattern, lambda match: match[1] + " " + json.dumps(value), source)
-        if count != 1:
-            raise ValueError(f"Не удалось настроить [{section}] {key} для EXE.")
-    tomllib.loads(source)
-    return "# Переносимая EXE-сборка: reader.library_path не используется, библиотека встроена.\n" + source
+    """Preserve settings/comments, remove build-machine paths and device selection."""
+    import tomlkit
+    doc = tomlkit.parse(source)
+    for section in ("reader", "state", "printer"):
+        if section not in doc:
+            doc[section] = tomlkit.table()
+    doc['reader']['library_path'] = 'bundled'
+    doc['state']['pending_id_file'] = 'pending_id_change.json'
+    doc['state']['batch_cards_file'] = 'batch_cards.json'
+    doc['printer']['library_path'] = 'bundled'
+    doc['printer']['timini_path'] = 'bundled'
+    doc['printer']['address'] = ''
+    doc['printer']['name'] = ''
+    return "# Автономная EXE-сборка: библиотеки считывателя и термопринтера встроены.\n" + tomlkit.dumps(doc)
 
 
 def require_windows():
     if sys.platform != "win32":
-        raise ValueError("Windows EXE нужно собирать на Windows. Запусти скрипт там или GitHub Actions Windows portable build.")
+        raise ValueError("Windows EXE нужно собирать на Windows. Запусти скрипт там или GitHub Actions Windows standalone manager.")
     if sys.version_info < (3, 11):
         raise ValueError("Нужен Python 3.11 или новее; рекомендуется Python 3.13 x64.")
     if struct.calcsize("P") != 8 or platform.machine().lower() not in ("amd64", "x86_64"):
@@ -182,7 +222,7 @@ def stage_source(reader, destination):
 def clean_runtime_environment():
     env = os.environ.copy()
     for key in list(env):
-        if key.upper().startswith(("PYTHON", "PYINSTALLER", "_PYI")) or key.upper() == "VIRTUAL_ENV":
+        if key.upper().startswith(("PYTHON", "PYINSTALLER", "_PYI")) or key.upper() in ("VIRTUAL_ENV", "CYBERWALL_TIMINI_PATH"):
             env.pop(key, None)
     # Самопроверка не должна находить DLL из сборочного Python через PATH.
     windows = env.get("SystemRoot", r"C:\Windows")
@@ -228,9 +268,11 @@ def make_zip(bundle, output):
     return output
 
 
-def build(reader=None, output=None, *, no_install=False):
+def build(reader=None, output=None, *, printer=None, timini=None, no_install=False):
     require_windows()
     reader = resolve_reader(reader)
+    printer, timini, timini_revision = resolve_printer_sources(printer, timini)
+    printer_version = read_version(printer / "src/cyberwall_id_printer/__init__.py", "__version__")
     version = read_version(APP_DIR / "cyberwall_master_manager.py", "VERSION")
     reader_version = read_version(reader / "wcopy_reader.py", "__version__")
     output = Path(output or APP_DIR.parent / "builds" / f"{APP_NAME}_v{version}_windows_x64.zip").resolve()
@@ -249,11 +291,15 @@ def build(reader=None, output=None, *, no_install=False):
             run([python, "-m", "pip", "--disable-pip-version-check", "install", "--no-input",
                  "--only-binary=:all:", PYINSTALLER_REQUIREMENT,
                  "-r", APP_DIR / "requirements.txt", "-r", reader / "requirements.txt"])
+            run([python, "-m", "pip", "install", "--only-binary=:all:", str(printer) + "[printer]"])
         else:
             print("Используем заранее подготовленное окружение; pip не запускается.", flush=True)
-        run([python, "-c", "import PyInstaller, pymysql, hid, cryptography"])
+        run([python, "-c", "import PyInstaller, pymysql, hid, cryptography, tomlkit, cyberwall_id_printer, bleak; "
+             "assert cyberwall_id_printer.__version__ == __import__('sys').argv[1]", printer_version])
         src = work / "src"
         stage_source(reader, src)
+        manifest = work / "cyberwall_timini.json"
+        manifest.write_text(json.dumps({"revision": timini_revision}), encoding="utf-8")
         print("Упаковываем приложение...", flush=True)
         run([python, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--console", "--noupx",
              "--name", APP_NAME, "--distpath", work / "dist", "--workpath", work / "build",
@@ -262,14 +308,23 @@ def build(reader=None, output=None, *, no_install=False):
              "--collect-submodules", "pymysql", "--collect-submodules", "cryptography",
              "--collect-binaries", "cryptography", "--collect-data", "cryptography",
              "--copy-metadata", "PyMySQL", "--copy-metadata", "hidapi", "--copy-metadata", "cryptography",
+             *printer_packaging_arguments(timini, manifest),
              src / "release_entry.py"], cwd=src)
         bundle = work / "dist" / APP_NAME
         (bundle / "config.toml").write_text(config, encoding="utf-8")
         (bundle / "README.txt").write_text(USER_README.format(version=version, reader_version=reader_version), encoding="utf-8-sig")
         metadata = run([python, "-c", METADATA_SCRIPT, bundle / "LICENSES"],
                        capture_output=True, text=True, encoding="utf-8")
+        licenses = bundle / "LICENSES" / "TiMini-Print"
+        licenses.mkdir(parents=True, exist_ok=True)
+        for name in ("LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.txt"):
+            if (timini / name).is_file():
+                shutil.copy2(timini / name, licenses / name)
+        (licenses / "SOURCE.txt").write_text(
+            "https://github.com/Dejniel/TiMini-Print\nRevision: " + timini_revision + "\nUnmodified runtime modules and catalog.\n", encoding="utf-8")
         build_info = json.loads(metadata.stdout)
         build_info.update(application=APP_NAME, version=version, reader_version=reader_version,
+                          printer_version=printer_version, timini_revision=timini_revision,
                           target="windows-x64", reader_sha256=hashlib.sha256((reader / "wcopy_reader.py").read_bytes()).hexdigest())
         (bundle / "BUILD_INFO.json").write_text(json.dumps(build_info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         # Проверяем перенос в путь с пробелами/кириллицей, вне папки исходников.
@@ -278,9 +333,21 @@ def build(reader=None, output=None, *, no_install=False):
         shutil.move(str(bundle), str(moved))
         print("Проверяем EXE без Python в PATH, без БД и USB...", flush=True)
         report = verify_executable(moved, work)
-        if report["reader_version"] != reader_version or report["application_version"] != version:
+        if (report["reader_version"] != reader_version or report["application_version"] != version
+                or report.get("printer_version") != printer_version
+                or report.get("timini_revision") != timini_revision
+                or report.get("printer_self_test") != "ok"):
             raise ValueError("Версии внутри EXE не совпали с исходниками сборки.")
-        make_zip(moved, output)
+        # The distributable ZIP itself must survive extraction and self-test.
+        archive = make_zip(moved, output)
+        try:
+            unpacked = work / "Распаковка ZIP без исходников"
+            with zipfile.ZipFile(archive) as package:
+                package.extractall(unpacked)
+            verify_executable(unpacked / APP_NAME, work)
+        except BaseException:
+            archive.unlink(missing_ok=True)
+            raise
     print(f"Готово: {output}\nПередай пользователю весь ZIP. Установка Python на его ПК не нужна.")
     return output
 
@@ -289,11 +356,13 @@ def main():
     configure_output()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reader", type=Path, help="Папка библиотеки; по умолчанию reader.library_path из config.toml")
+    parser.add_argument("--printer", type=Path, help="Корень CyberpunkIdPrinter; по умолчанию из config.toml")
+    parser.add_argument("--timini", type=Path, help="Чистый checkout TiMini-Print; по умолчанию из config.toml")
     parser.add_argument("--output", type=Path, help="Новый ZIP; по умолчанию ../builds/<имя>_v<версия>_windows_x64.zip")
     parser.add_argument("--no-install", action="store_true", help="Не устанавливать сборочные зависимости; использовать текущий Python")
     args = parser.parse_args()
     try:
-        build(args.reader, args.output, no_install=args.no_install)
+        build(args.reader, args.output, printer=args.printer, timini=args.timini, no_install=args.no_install)
     except subprocess.CalledProcessError as error:
         if error.stdout:
             print(error.stdout)

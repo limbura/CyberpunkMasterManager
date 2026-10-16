@@ -5,6 +5,40 @@ import sys
 import traceback
 
 
+def printer_self_test():
+    """Exercise the bundled rendering/encoding/native BLE imports, without I/O."""
+    import importlib
+    from types import SimpleNamespace
+    import cyberwall_id_printer as api
+    from cyberwall_id_printer.backends.timini import _imports, TIMINI_REVISION, capabilities_for
+    from cyberwall_id_printer.layout import render_for_head
+    from timiniprint.printing.raster_job import combine_raster_page_jobs
+    Catalog, *_ = _imports(None)
+    # These dynamic WinRT imports must work on a PC with no Python installation.
+    for module in ('bleak.backends.winrt.client', 'bleak.backends.winrt.scanner',
+                   'winrt.windows.devices.bluetooth', 'winrt.windows.devices.bluetooth.advertisement',
+                   'winrt.windows.devices.bluetooth.genericattributeprofile',
+                   'winrt.windows.devices.enumeration', 'winrt.windows.foundation',
+                   'winrt.windows.storage.streams', 'pypdfium2', 'crc8', 'serial', 'tomlkit'):
+        importlib.import_module(module)
+    catalog = Catalog.load()
+    device = next(catalog.device_from_model(model.model_key) for model in catalog.models
+                  if catalog.device_from_model(model.model_key).profile_key == 'v5g_small_203')
+    caps = capabilities_for(device)
+    backend = api.TiMiniBackend()
+    backend._connected = SimpleNamespace(printer_device=lambda: device, print_capabilities=lambda: None,
+                                         raster_pages_job=combine_raster_page_jobs)
+    for mode in api.LabelMode:
+        blank = mode.value.startswith('blank-')
+        image = render_for_head(None if blank else '123456789',
+            'Роза фон Праунхайм' if mode == api.LabelMode.ID_NAME else None,
+            api.MediaConfig(), caps.head_width_px, mode=mode)
+        if image.mode != '1' or not backend.prepare_copies(image, api.MediaConfig(), 2).payload:
+            raise RuntimeError('Встроенная печать не прошла проверку макетов и протокола.')
+    return {'printer_version': api.__version__, 'timini_revision': TIMINI_REVISION,
+            'printer_self_test': 'ok'}
+
+
 def self_test():
     import inspect
     import pymysql
@@ -52,7 +86,8 @@ def self_test():
     if decoded != expected:
         raise RuntimeError("Проверка RSA-авторизации не пройдена.")
     # Это локальная проверка наличия файлов; соединения и изменения БД не выполняются.
-    print(json.dumps({"status": "ok", "application_version": app.VERSION,
+    printer_report = printer_self_test()
+    print(json.dumps({**printer_report, "status": "ok", "application_version": app.VERSION,
                       "reader_version": wcopy_reader.__version__, "frozen": True,
                       "config_file": str(APP_DIR / "config.toml"),
                       "database": SETTINGS["database"]["name"]}, ensure_ascii=True))

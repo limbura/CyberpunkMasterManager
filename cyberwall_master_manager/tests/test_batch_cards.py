@@ -210,7 +210,7 @@ class BatchTests(unittest.TestCase):
 
     def test_batch_entry_in_general_search(self):
         self.db.connection = connection(Cursor())
-        with patch.object(app, 'CONSOLE', Mock()), patch.object(app, 'read_input', side_effect=[':batch', ':b']), patch.object(app.batch_cards, 'run') as run:
+        with patch.object(app, 'CONSOLE', Mock()), patch.object(app, 'read_input', side_effect=[':menu', '2', '0', ':b']), patch.object(app.batch_cards, 'run') as run:
             self.assertIsNone(app.choose_candidate(self.db))
         run.assert_called_once()
 

@@ -47,13 +47,25 @@ def print_label(service, account_id=None, name=None, *, mode='id-name', copies=1
         print(f'Печать: {safe(error)}')
 
 
+def choose_label_mode(ask):
+    while True:
+        print('\nПЕЧАТЬ НАКЛЕЙКИ ID')
+        print('1 — ID и имя\n2 — только ID\n0, Enter, :b — назад')
+        choice = ask('Вариант: ').strip().lower()
+        if choice in ('', '0', ':b'):
+            return None
+        if choice in ('1', '2'):
+            return 'id-name' if choice == '1' else 'id-only'
+        print('Введи номер пункта меню.')
+
+
 def templates(service, ask):
     if service is None:
         show_status(service)
         return
     while True:
         print('\nПечать шаблонов:')
-        print('1 — ID и имя\n2 — только ID\n0 / Enter — назад')
+        print('1 — ID и имя\n2 — только ID\n0, Enter, :b — назад')
         choice = ask('Шаблон: ').strip().lower()
         if choice in ('', '0', ':b'):
             return
@@ -61,7 +73,7 @@ def templates(service, ask):
             continue
         limit = service.settings['max_copies']
         while True:
-            value = ask(f'Количество 1…{limit} [Enter — 1, :b — назад]: ').strip()
+            value = ask(f'Количество 1…{limit} [Enter — 1; :b — назад]: ').strip()
             if value.lower() == ':b':
                 break
             value = value or '1'
@@ -79,7 +91,7 @@ def printer_menu(service, ask):
         if service is None or service.status.state in ('disabled', 'unavailable', 'stopped'):
             return
         print('1 — найти и выбрать термопринтер\n2 — подключиться к последнему\n3 — отключиться')
-        print('4 — калибровка этикеток\n0 / Enter — назад')
+        print('4 — калибровка этикеток\n0, Enter, :b — назад')
         choice = ask('Действие: ').strip().lower()
         if choice in ('', '0', ':b'):
             return
@@ -93,8 +105,8 @@ def printer_menu(service, ask):
                     continue
                 for index, device in enumerate(devices, 1):
                     print(f"{index} — {safe(device['name'])} ({safe(device['address'])})")
-                number = ask('Номер [Enter — отмена]: ').strip()
-                if not number:
+                number = ask('Номер [Enter, :b — отмена]: ').strip()
+                if number.lower() in ('', ':b'):
                     continue
                 if not number.isascii() or not number.isdecimal() or not 1 <= int(number) <= len(devices):
                     print('Нет такого номера.')
