@@ -176,7 +176,7 @@ class SettingsAndMenuTests(unittest.TestCase):
         ask = Mock(side_effect=['2', '10'])
         with patch.object(printer_menu, 'print_label') as printing, contextlib.redirect_stdout(io.StringIO()):
             printer_menu.templates(service, ask)
-        printing.assert_called_once_with(service, mode='blank-id-only', copies=10)
+        printing.assert_called_once_with(service, mode='blank-id-only', copies=10, ask=ask)
         self.assertEqual(ask.call_count, 2)
 
     def test_quit_during_device_selection_propagates(self):
@@ -200,11 +200,11 @@ class SettingsAndMenuTests(unittest.TestCase):
             db.refresh.side_effect = [old, fresh, fresh]
             db.access_table.return_value = []
             with patch.object(app, 'recover_pending_id'), \
-                 patch.object(app, 'read_input', side_effect=['13', command, '0']), \
+                 patch.object(app, 'read_input', side_effect=['13', command, '0']) as ask, \
                  patch.object(app.printer_menu, 'print_label') as printing, \
                  contextlib.redirect_stdout(io.StringIO()):
                 app.inspect_entity(db, old)
-            printing.assert_called_once_with(app.THERMAL_PRINTER, '987654321', name, mode=mode)
+            printing.assert_called_once_with(app.THERMAL_PRINTER, '987654321', name, mode=mode, ask=ask)
 
     def test_print_submenu_cancel_never_prints(self):
         import cyberwall_master_manager as app
@@ -230,3 +230,64 @@ class SettingsAndMenuTests(unittest.TestCase):
         templates.assert_called_once()
         devices.assert_called_once()
         db.search.assert_not_called()
+
+class LabelRoutingTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        from unittest.mock import AsyncMock
+        self.standard = FakePrinter()
+        self.single = SimpleNamespace(
+            media=object(), connect=AsyncMock(return_value=SimpleNamespace(address='A', name='P', calibration=False)),
+            disconnect=AsyncMock(), check_connection=AsyncMock(return_value=True),
+            print_image=AsyncMock(return_value=SimpleNamespace(copies=1)),
+            confirm_removed=AsyncMock(), recover=AsyncMock())
+        self.service = ThermalPrinterService({}, '/tmp/config.toml')
+        self.service._single_printer = self.single
+        self.service._standard_printer = self.standard
+        self.service._printer = self.single
+        self.service._render = Mock(return_value='image')
+        self.service._update(state='connected', address='A')
+        self.service._submit = lambda action, **kwargs: action()
+
+    async def test_single_batch_single_switches_sessions(self):
+        service = self.service
+        await service.print_label('123456789', mode='id-only')
+        self.single.print_image.assert_awaited_once_with('image')
+        self.single.confirm_removed.assert_not_awaited()
+        await service.print_label(mode='blank-id-only', copies=3)
+        self.assertEqual(self.standard.jobs[0][2]['copies'], 3)
+        self.single.disconnect.assert_awaited()
+        await service.print_label(mode='blank-id-name')
+        self.single.connect.assert_awaited_once_with('A')
+        self.assertFalse(self.standard.alive)
+        self.assertEqual(self.single.print_image.await_count, 2)
+
+    async def test_confirmation_only_after_explicit_user_action(self):
+        from modules.thermal_printer import RemovalRequired
+        self.single.print_image.side_effect = [RemovalRequired(), SimpleNamespace(copies=1)]
+        with self.assertRaises(RemovalRequired):
+            await self.service.print_label('123456789')
+        self.single.confirm_removed.assert_not_awaited()
+        await self.service.print_label('123456789', removed=True)
+        self.single.confirm_removed.assert_awaited_once()
+
+    async def test_manual_calibration_uses_forward_recovery(self):
+        await self.service.calibrate()
+        self.single.recover.assert_awaited_once()
+        self.single.confirm_removed.assert_not_awaited()
+
+
+class RemovalMenuTests(unittest.TestCase):
+    def test_confirm_or_cancel(self):
+        from concurrent.futures import Future
+        from modules.thermal_printer import RemovalRequired
+        for answer, count in [('', 2), (':b', 1)]:
+            first, second = Future(), Future()
+            first.set_exception(RemovalRequired())
+            second.set_result(SimpleNamespace(copies=1))
+            service = Mock()
+            service.print_label.side_effect = [first, second]
+            with contextlib.redirect_stdout(io.StringIO()):
+                printer_menu.print_label(service, '123456789', ask=Mock(return_value=answer))
+            self.assertEqual(service.print_label.call_count, count)
+            if count == 2:
+                self.assertTrue(service.print_label.call_args.kwargs['removed'])

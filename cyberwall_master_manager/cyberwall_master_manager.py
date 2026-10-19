@@ -998,7 +998,7 @@ def inspect_entity(db, selected):
                 if mode is not None:
                     current = db.refresh(selected)
                     printer_menu.print_label(THERMAL_PRINTER, str(current.number).zfill(9),
-                        current.label if mode == "id-name" else None, mode=mode)
+                        current.label if mode == "id-name" else None, mode=mode, ask=read_input)
             except SelectionChanged as error:
                 print(clean(error))
         elif command == "n":

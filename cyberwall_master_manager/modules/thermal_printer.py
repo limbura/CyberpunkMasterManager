@@ -8,6 +8,10 @@ import threading
 from .printer_settings import printer_settings, save_printer
 
 
+class RemovalRequired(RuntimeError):
+    """The user must remove the presented sticker before resubmitting."""
+
+
 @dataclass(frozen=True)
 class PrinterStatus:
     state: str = 'stopped'
@@ -30,6 +34,9 @@ class ThermalPrinterService:
         self._loop = None
         self._started = threading.Event()
         self._printer = self._backend = None
+        self._single_printer = self._standard_printer = None
+        self._removal_error = RemovalRequired
+        self._render = None
         self._wanted = self.settings['auto_connect']
         self._closing = False
         self._next_attempt = 0.0
@@ -62,7 +69,20 @@ class ThermalPrinterService:
         backend = api.TiMiniBackend(
             (self.config_path.parent / path).resolve() if path else None,
             blackening=self.settings['blackening'], timeout=self.settings['scan_timeout_seconds'])
-        return backend, api.Printer(backend, media=api.MediaConfig(**paper))
+        media = api.MediaConfig(**paper)
+        if paper['paper_type'] == 'labels':
+            if not hasattr(api, 'LabelPrinter'):
+                raise RuntimeError('Обнови CyberpunkIdPrinter: требуется API LabelPrinter.')
+            from cyberwall_id_printer.layout import render_for_head
+            self._render = render_for_head
+            self._removal_error = api.RemovalRequired
+            self._single_printer = api.LabelPrinter(
+                timini_path=(self.config_path.parent / path).resolve() if path else None,
+                media=media, scan_timeout=self.settings['scan_timeout_seconds'])
+            # Standard batches use TiMini's ordinary continuous-feed recipe.
+            media = replace(media, paper_type=api.PaperType.CONTINUOUS)
+        self._standard_printer = api.Printer(backend, media=media)
+        return backend, self._single_printer or self._standard_printer
 
     def start(self):
         if self._thread is not None:
@@ -106,7 +126,7 @@ class ThermalPrinterService:
             await self._disconnect()
             raise
         self._update(state='connected', address=caps.address, name=caps.name or name,
-                     detail='', calibration=caps.calibration)
+                     detail='', calibration=self._printer is self._single_printer or caps.calibration)
         if remember:
             self.settings['address'], self.settings['name'] = caps.address, caps.name or name
             try:
@@ -196,7 +216,21 @@ class ThermalPrinterService:
             self._update(state='disconnected', detail='Отключён вручную. Автоподключение приостановлено.')
         return self._submit(action)
 
-    def print_label(self, account_id=None, name=None, *, mode='id-name', copies=1):
+    async def _use_printer(self, target):
+        if target is self._printer:
+            return
+        address = self.status.address
+        await self._disconnect()
+        self._printer = target
+        try:
+            await self._connect(address)
+        except Exception as error:
+            self._update(state='disconnected', detail=str(error))
+            self._retry_later()
+            raise
+
+    def print_label(self, account_id=None, name=None, *, mode='id-name', copies=1,
+                    removed=False):
         if type(copies) is not int or not 1 <= copies <= self.settings['max_copies']:
             raise ValueError(f"Количество: целое число 1…{self.settings['max_copies']}.")
         async def action():
@@ -207,6 +241,19 @@ class ThermalPrinterService:
                 self._retry_later()
                 raise RuntimeError('Связь потеряна. Повтори печать вручную после подключения.')
             try:
+                if self._single_printer is not None:
+                    target = self._single_printer if copies == 1 else self._standard_printer
+                    await self._use_printer(target)
+                    if target is self._single_printer:
+                        image = self._render(account_id, name, target.media, 384, mode=mode,
+                            inactive=True if mode.startswith('blank-') else self.settings['layout']['inactive_segments'],
+                            decorations=self.settings['layout']['decorations'])
+                        if removed:
+                            await target.confirm_removed()
+                        try:
+                            return await target.print_image(image)
+                        except self._removal_error as error:
+                            raise RemovalRequired('Сними выданную наклейку перед обратным втягиванием.') from error
                 return await self._printer.print_id(account_id, name, mode=mode, copies=copies,
                     inactive=True if mode.startswith('blank-') else self.settings['layout']['inactive_segments'],
                     decorations=self.settings['layout']['decorations'])
@@ -222,7 +269,11 @@ class ThermalPrinterService:
     def calibrate(self):
         async def action():
             try:
-                await self._printer.calibrate()
+                if self._single_printer is not None:
+                    await self._use_printer(self._single_printer)
+                    await self._printer.recover()
+                else:
+                    await self._printer.calibrate()
             except Exception:
                 # A calibration failure can leave library session uncertain.
                 if not await self._printer.check_connection():

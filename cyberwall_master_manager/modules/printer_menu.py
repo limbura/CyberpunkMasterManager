@@ -1,5 +1,6 @@
 """Console actions; background service never writes over a user's input line."""
 from concurrent.futures import TimeoutError
+from .thermal_printer import RemovalRequired
 
 STATES = {'stopped': 'не запущен', 'disabled': 'отключён в настройках',
           'unavailable': 'модуль недоступен', 'unselected': 'не выбран',
@@ -31,20 +32,38 @@ def wait(future):
         except TimeoutError:
             if future.done():
                 return future.result()  # A TimeoutError raised by the operation itself.
+        except RemovalRequired:
+            raise
         except Exception as error:
             raise RuntimeError(str(error)) from error
 
 
-def print_label(service, account_id=None, name=None, *, mode='id-name', copies=1):
-    try:
+def print_label(service, account_id=None, name=None, *, mode='id-name', copies=1, ask=input):
+    def send(**kwargs):
         if service is None:
             raise RuntimeError('Сервис термопринтера не запущен.')
-        future = service.print_label(account_id, name, mode=mode, copies=copies)
-        print(f'Передача на термопринтер: {copies} экз. …')
-        result = wait(future)
-        print(f'Серия отправлена: {result.copies} экз. Физическое завершение печати не подтверждается.')
+        return wait(service.print_label(account_id, name, mode=mode, copies=copies, **kwargs))
+
+    print(f'Передача на термопринтер: {copies} экз. …')
+    try:
+        result = send()
+    except RemovalRequired:
+        result = None
     except Exception as error:
         print(f'Печать: {safe(error)}')
+        return
+    if result is None:
+        # Navigation exceptions from ask must reach the application's main loop.
+        answer = ask('Сними все выданные наклейки и закрой крышку. Enter — снято, печатать; :b — отмена: ').strip().lower()
+        if answer:
+            print('Печать отменена.')
+            return
+        try:
+            result = send(removed=True)
+        except Exception as error:
+            print(f'Печать: {safe(error)}')
+            return
+    print(f'Серия отправлена: {result.copies} экз. Физическое завершение печати не подтверждается.')
 
 
 def choose_label_mode(ask):
@@ -80,7 +99,7 @@ def templates(service, ask):
             if not value.isascii() or not value.isdecimal() or not 1 <= int(value) <= limit:
                 print(f'Введи целое число от 1 до {limit}.')
                 continue
-            print_label(service, mode='blank-id-name' if choice == '1' else 'blank-id-only', copies=int(value))
+            print_label(service, mode='blank-id-name' if choice == '1' else 'blank-id-only', copies=int(value), ask=ask)
             return
 
 
@@ -122,8 +141,6 @@ def printer_menu(service, ask):
             elif choice == '4':
                 if service.settings['paper']['type'] != 'labels':
                     print('Калибровка требует printer.paper.type = "labels" в config.toml.')
-                elif not service.status.calibration:
-                    print('Команда калибровки для выбранного термопринтера пока не поддерживается.')
                 else:
                     wait(service.calibrate())
                     print('Калибровка выполнена.')
