@@ -78,7 +78,8 @@ class ThermalPrinterService:
             self._removal_error = api.RemovalRequired
             self._single_printer = api.LabelPrinter(
                 timini_path=(self.config_path.parent / path).resolve() if path else None,
-                media=media, scan_timeout=self.settings['scan_timeout_seconds'])
+                media=media, settings=api.LabelSettings(**self.settings['labels']),
+                scan_timeout=self.settings['scan_timeout_seconds'])
             # Standard batches use TiMini's ordinary continuous-feed recipe.
             media = replace(media, paper_type=api.PaperType.CONTINUOUS)
         self._standard_printer = api.Printer(backend, media=media)
