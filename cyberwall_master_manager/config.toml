@@ -32,8 +32,8 @@ batch_cards_file = "batch_cards.json"
 [printer]
 enabled = true
 # Заполняется после успешного выбора через :printer. Не имя модели по умолчанию.
-address = ""
-name = ""
+address = "EB:11:06:26:77:26"
+name = "MX10"
 auto_connect = true
 auto_reconnect = true
 reconnect_delay_seconds = 5
