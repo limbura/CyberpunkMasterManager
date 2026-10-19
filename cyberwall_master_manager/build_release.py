@@ -62,7 +62,10 @@ def printer_packaging_arguments(timini, manifest):
 
 
 USER_README = """CYBERWALL - менеджмент для мастеров
-Версия программы: {version}. Библиотека считывателя: {reader_version}.
+Версия программы: {version}.
+Библиотека считывателя (wcopy_reader): {reader_version}.
+Библиотека принтера (cyberwall_id_printer): {printer_version}.
+TiMini-Print (ревизия Git): {timini_revision}.
 
 1. Распакуй ВЕСЬ ZIP в отдельную папку, например в Документы.
 2. При необходимости измени адрес БД, порт и пользователя в config.toml.
@@ -287,7 +290,10 @@ def build(reader=None, output=None, *, printer=None, timini=None, no_install=Fal
     if output.exists():
         raise ValueError(f"Архив уже существует: {output}. Укажи новое имя.")
     config = portable_config((APP_DIR / "config.toml").read_text(encoding="utf-8"))
-    print(f"Сборка {version}; библиотека RFID {reader_version}: {reader}", flush=True)
+    print(f"Сборка {version}\n"
+          f"Библиотека считывателя (wcopy_reader) {reader_version}: {reader}\n"
+          f"Библиотека принтера (cyberwall_id_printer) {printer_version}: {printer}\n"
+          f"TiMini-Print (ревизия Git) {timini_revision}: {timini}", flush=True)
     with tempfile.TemporaryDirectory(prefix="cyberwall-build-") as temp:
         work = Path(temp)
         python = Path(sys.executable)
@@ -320,7 +326,9 @@ def build(reader=None, output=None, *, printer=None, timini=None, no_install=Fal
              src / "release_entry.py"], cwd=src)
         bundle = work / "dist" / APP_NAME
         (bundle / "config.toml").write_text(config, encoding="utf-8")
-        (bundle / "README.txt").write_text(USER_README.format(version=version, reader_version=reader_version), encoding="utf-8-sig")
+        (bundle / "README.txt").write_text(USER_README.format(
+            version=version, reader_version=reader_version,
+            printer_version=printer_version, timini_revision=timini_revision), encoding="utf-8-sig")
         metadata = run([python, "-c", METADATA_SCRIPT, bundle / "LICENSES"],
                        capture_output=True, text=True, encoding="utf-8")
         licenses = bundle / "LICENSES" / "TiMini-Print"
