@@ -21,6 +21,17 @@ class PrinterStatus:
     busy: bool = False
     calibration: bool = False
     label_state: str = 'disconnected'
+    device_status: str = 'unknown'
+    last_error: str = ''
+
+
+DEVICE_STATES = {'unknown': 'неизвестно', 'normal': 'готов', 'paper_out': 'нет бумаги',
+                 'cover_open': 'крышка открыта', 'overheat': 'перегрев',
+                 'low_battery': 'низкий заряд аккумулятора'}
+
+
+def device_message(reason):
+    return DEVICE_STATES.get(reason, f'ошибка устройства ({reason})')
 
 
 class ThermalPrinterService:
@@ -72,8 +83,8 @@ class ThermalPrinterService:
             blackening=self.settings['blackening'], timeout=self.settings['scan_timeout_seconds'])
         media = api.MediaConfig(**paper)
         if paper['paper_type'] == 'labels':
-            if not hasattr(api, 'LabelPrinter'):
-                raise RuntimeError('Обнови CyberpunkIdPrinter: требуется API LabelPrinter.')
+            if not hasattr(api, 'LabelPrinter') or not hasattr(api, 'DeviceStatusError'):
+                raise RuntimeError('Обнови CyberpunkIdPrinter: требуются LabelPrinter и DeviceStatusError.')
             from cyberwall_id_printer.layout import render_for_head
             self._render = render_for_head
             self._removal_error = api.RemovalRequired
@@ -81,7 +92,8 @@ class ThermalPrinterService:
                 timini_path=(self.config_path.parent / path).resolve() if path else None,
                 media=media, settings=api.LabelSettings(**self.settings['labels']),
                 scan_timeout=self.settings['scan_timeout_seconds'],
-                on_event=lambda event: self._update(label_state=event['state']))
+                on_event=lambda event: self._update(label_state=event['state'],
+                    device_status=event.get('device_status', 'unknown')))
             # Standard batches use TiMini's ordinary continuous-feed recipe.
             media = replace(media, paper_type=api.PaperType.CONTINUOUS)
         self._standard_printer = api.Printer(backend, media=media)
@@ -118,7 +130,7 @@ class ThermalPrinterService:
         except Exception:
             # Cleanup must not hide the original transmission/connection error.
             pass
-        self._update(calibration=False)
+        self._update(calibration=False, device_status='unknown')
 
     async def _connect(self, address, *, remember=False, name=''):
         self._update(state='connecting', detail='Подключение к термопринтеру…')
@@ -154,6 +166,14 @@ class ThermalPrinterService:
                                 await self._disconnect()
                                 self._update(state='disconnected', detail='Связь с термопринтером потеряна.')
                                 self._retry_later()
+                            elif self._printer is self._single_printer and hasattr(self._printer, 'poll'):
+                                try:
+                                    await self._printer.poll()
+                                except Exception as error:
+                                    if getattr(error, 'reason', None) is None:
+                                        raise
+                                    # A reported device fault is not a broken BLE connection.
+                                    self._update(device_status=error.reason)
                         elif (self._wanted and self.settings['address']
                               and self._loop.time() >= self._next_attempt):
                             try:
@@ -184,7 +204,19 @@ class ThermalPrinterService:
         self._active = asyncio.current_task()
         try:
             async with self._operation_lock:
-                return await action()
+                try:
+                    return await action()
+                except Exception as error:
+                    reason = getattr(error, 'reason', None)
+                    if reason is None:
+                        raise
+                    message = ('Нет бумаги. Установи рулон, закрой крышку и выполни калибровку.'
+                               if reason == 'paper_out' else
+                               f'Принтер: {device_message(reason)}. Устрани причину и выполни калибровку.')
+                    if getattr(error, 'may_have_printed', False):
+                        message += ' Наклейка могла напечататься — проверь перед повтором. Автоматического повтора не будет.'
+                    self._update(device_status=reason, last_error=message)
+                    raise RuntimeError(message) from error
         finally:
             self._active = None
             self._update(busy=False)
@@ -261,6 +293,8 @@ class ThermalPrinterService:
                     inactive=True if mode.startswith('blank-') else self.settings['layout']['inactive_segments'],
                     decorations=self.settings['layout']['decorations'])
             except Exception as error:
+                if getattr(error, 'reason', None) is not None:
+                    raise
                 if getattr(error, 'may_have_printed', False):
                     await self._disconnect()
                     self._update(state='disconnected', detail='Передача прервана. Задание удалено, повтора не будет.')

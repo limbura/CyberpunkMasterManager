@@ -994,11 +994,14 @@ def inspect_entity(db, selected):
         elif selected.kind == "account" and command == "13":
             # Refresh once more at the actual print action; account number may have changed.
             try:
-                mode = printer_menu.choose_label_mode(read_input, THERMAL_PRINTER)
-                if mode is not None:
+                while True:
+                    mode = printer_menu.choose_label_mode(read_input, THERMAL_PRINTER)
+                    if mode is None:
+                        break
                     current = db.refresh(selected)
-                    printer_menu.print_label(THERMAL_PRINTER, str(current.number).zfill(9),
-                        current.label if mode == "id-name" else None, mode=mode, ask=read_input)
+                    if printer_menu.print_label(THERMAL_PRINTER, str(current.number).zfill(9),
+                            current.label if mode == "id-name" else None, mode=mode, ask=read_input):
+                        break
             except SelectionChanged as error:
                 print(clean(error))
         elif command == "n":

@@ -1,6 +1,6 @@
 """Console actions; background service never writes over a user's input line."""
 from concurrent.futures import TimeoutError
-from .thermal_printer import RemovalRequired
+from .thermal_printer import RemovalRequired, device_message
 
 STATES = {'stopped': 'не запущен', 'disabled': 'отключён в настройках',
           'unavailable': 'модуль недоступен', 'unselected': 'не выбран',
@@ -20,6 +20,7 @@ def show_status(service):
     address = f' ({safe(status.address)})' if status.address else ''
     print(f"Термопринтер: {STATES.get(status.state, status.state)}{address}" +
           ('; выполняется операция' if status.busy else ''))
+    print(f"Состояние: {device_message(getattr(status, 'device_status', 'unknown'))}")
     if status.detail:
         print(safe(status.detail))
 
@@ -51,19 +52,21 @@ def print_label(service, account_id=None, name=None, *, mode='id-name', copies=1
         result = None
     except Exception as error:
         print(f'Печать: {safe(error)}')
-        return
+        return False
     if result is None:
         # Navigation exceptions from ask must reach the application's main loop.
         answer = ask('Сними все выданные наклейки и закрой крышку. Enter — снято, печатать; :b — отмена: ').strip().lower()
         if answer:
             print('Печать отменена.')
-            return
+            return False
         try:
             result = send(removed=True)
         except Exception as error:
             print(f'Печать: {safe(error)}')
-            return
+            return False
     print(f'Серия отправлена: {result.copies} экз. Физическое завершение печати не подтверждается.')
+
+    return True
 
 
 LABEL_STATES = {'disconnected': 'Нет соединения', 'unknown': 'Положение неизвестно',
@@ -76,6 +79,7 @@ def show_print_status(service):
         return
     status = service.status
     print(f"Принтер: {STATES.get(status.state, status.state)}")
+    print(f"Состояние: {device_message(getattr(status, 'device_status', 'unknown'))}")
     state = getattr(status, 'label_state', 'disconnected')
     print(f"Печать: {LABEL_STATES.get(state, state)}")
 
@@ -168,8 +172,9 @@ def templates(service, ask):
             if not value.isascii() or not value.isdecimal() or not 1 <= int(value) <= limit:
                 print(f'Введи целое число от 1 до {limit}.')
                 continue
-            print_label(service, mode='blank-id-name' if choice == '1' else 'blank-id-only', copies=int(value), ask=ask)
-            return
+            if print_label(service, mode='blank-id-name' if choice == '1' else 'blank-id-only', copies=int(value), ask=ask):
+                return
+            break
 
 
 def printer_menu(service, ask):

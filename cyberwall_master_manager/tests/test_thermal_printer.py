@@ -324,3 +324,57 @@ class MaintenanceMenuTests(unittest.TestCase):
         self.assertEqual(mode, 'id-name')
         service.calibrate.assert_called_once()
         self.assertIn('Печать: Готово к печати', out.getvalue())
+
+
+class PaperOutTests(unittest.IsolatedAsyncioTestCase):
+    async def test_device_fault_keeps_connection_and_failure_history(self):
+        from unittest.mock import AsyncMock
+        service = ThermalPrinterService({}, '/tmp/config.toml')
+        service._operation_lock = asyncio.Lock()
+        service._printer = SimpleNamespace(disconnect=AsyncMock())
+        service._update(state='connected')
+        error = RuntimeError('device fault')
+        error.reason, error.status, error.stage = 'paper_out', 1, 'presenting'
+        error.may_have_printed = True
+        async def action():
+            raise error
+        with self.assertRaisesRegex(RuntimeError, 'Нет бумаги'):
+            await service._execute(action)
+        self.assertEqual(service.status.state, 'connected')
+        self.assertEqual(service.status.device_status, 'paper_out')
+        self.assertIn('могла напечататься', service.status.last_error)
+        message = service.status.last_error
+        service._update(device_status='normal')
+        self.assertEqual(service.status.last_error, message)
+        service._printer.disconnect.assert_not_awaited()
+
+    async def test_background_poll_does_not_disconnect_for_paper_out(self):
+        from unittest.mock import AsyncMock
+        service = ThermalPrinterService({}, '/tmp/config.toml')
+        service._operation_lock = asyncio.Lock()
+        error = RuntimeError('paper out')
+        error.reason = 'paper_out'
+        service._single_printer = SimpleNamespace(check_connection=AsyncMock(return_value=True),
+            poll=AsyncMock(side_effect=error), disconnect=AsyncMock())
+        service._printer = service._single_printer
+        service._update(state='connected')
+        with patch('modules.thermal_printer.asyncio.sleep', side_effect=asyncio.CancelledError):
+            with self.assertRaises(asyncio.CancelledError):
+                await service._watch()
+        self.assertEqual(service.status.device_status, 'paper_out')
+        self.assertEqual(service.status.state, 'connected')
+        service._printer.disconnect.assert_not_awaited()
+
+
+class PaperOutMenuTests(unittest.TestCase):
+    def test_templates_stays_in_menu_after_failure_without_replay(self):
+        from modules import printer_menu
+        service = SimpleNamespace(settings={'max_copies': 100}, status=SimpleNamespace(
+            state='connected', label_state='unknown', device_status='paper_out'))
+        ask = Mock(side_effect=['1', '1', '0'])
+        with patch.object(printer_menu, 'print_label', return_value=False) as printing, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            printer_menu.templates(service, ask)
+        printing.assert_called_once()
+        self.assertEqual(output.getvalue().count('Печать шаблонов:'), 2)
+        self.assertIn('нет бумаги', output.getvalue())
