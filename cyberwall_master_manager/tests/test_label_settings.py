@@ -36,7 +36,7 @@ class LabelSettingsTests(unittest.TestCase):
         api = SimpleNamespace(Printer=Mock(), TiMiniBackend=Mock(),
             MediaConfig=lambda **kw: Media(kw['paper_type']),
             LabelPrinter=Mock(), LabelSettings=Mock(return_value='label-settings'),
-            RemovalRequired=RuntimeError, PaperType=SimpleNamespace(CONTINUOUS='continuous'))
+            RemovalRequired=RuntimeError, DeviceStatusError=RuntimeError, PaperType=SimpleNamespace(CONTINUOUS='continuous'))
         with patch.dict(sys.modules, {'cyberwall_id_printer': api,
                          'cyberwall_id_printer.layout': SimpleNamespace(render_for_head=Mock())}):
             service = ThermalPrinterService({'library_path': '', 'paper': {'type': 'labels'},
