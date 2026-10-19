@@ -68,6 +68,16 @@ if errorlevel 1 (
 )
 
 echo.
+echo Проверяем зависимости термопринтера...
+"%PYTHON_EXE%" %PYTHON_ARGS% "install_printer.py"
+if errorlevel 1 (
+    echo.
+    echo ПРЕДУПРЕЖДЕНИЕ: зависимости термопринтера установить не удалось
+    echo Программа продолжит работу. Печать недоступна.
+    echo.
+)
+
+echo.
 "%PYTHON_EXE%" %PYTHON_ARGS% "cyberwall_master_manager.py"
 set "APP_RESULT=%ERRORLEVEL%"
 echo.

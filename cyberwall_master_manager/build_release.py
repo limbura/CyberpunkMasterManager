@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Собрать офлайн-комплект Windows x64: EXE + config.toml + ZIP, без установки на целевом ПК."""
+"""
+Собирает офлайн-комплект Windows x64: EXE + config.toml + ZIP
+Включает сам Python, все необходимые зависимости, в том числе библиотеку считывателя CyberpunkPcRfidReader (wcopy_reader_package),
+библиотеку принтера CyberpunkIdPrinter и необходимую ей библиотеку TiMiniPrint.
+Python и общедоступные зависимости скачиваются во время сборки из интернета. 
+CyberpunkPcRfidReader, CyberpunkIdPrinter и TiMini-Print должны быть на ПК при сборке, пути к ним указываются в config.toml
+(либо могут быть переданы аргументами при запуске скрипта)
+"""
 import argparse
 import ast
 import hashlib
@@ -280,7 +287,7 @@ def build(reader=None, output=None, *, printer=None, timini=None, no_install=Fal
     if output.exists():
         raise ValueError(f"Архив уже существует: {output}. Укажи новое имя.")
     config = portable_config((APP_DIR / "config.toml").read_text(encoding="utf-8"))
-    print(f"Сборка {version}; библиотека {reader_version}: {reader}", flush=True)
+    print(f"Сборка {version}; библиотека RFID {reader_version}: {reader}", flush=True)
     with tempfile.TemporaryDirectory(prefix="cyberwall-build-") as temp:
         work = Path(temp)
         python = Path(sys.executable)
