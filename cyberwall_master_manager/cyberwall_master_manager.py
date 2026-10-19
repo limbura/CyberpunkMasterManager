@@ -1118,7 +1118,10 @@ def main():
             connection = connect_interactively(automatic=automatic, defaults=defaults, store=store)
             db = Database(connection)
             scope = database_scope(db)
-            print(f"Подключено: {clean(connection.user)}@{clean(scope['host'])}:{scope['port']} / {clean(scope['database'])}.")
+            user = connection.user
+            if isinstance(user, bytes):
+                user = user.decode(connection.encoding, errors="replace")
+            print(f"Подключено: {clean(user)}@{clean(scope['host'])}:{scope['port']} / {clean(scope['database'])}.")
             print("Изменения выполняются только после подтверждения.")
             print("Карта выбирает аккаунт только в поиске и списке кандидатов.")
             print("USB считыватель можно подключить во время работы, все другие программы работающие со считывателем должны быть закрыты.")
@@ -1138,7 +1141,7 @@ def main():
                     if selected is not None:
                         inspect_entity(db, selected)
             except DisconnectRequested:
-                defaults = {**scope, "user": connection.user}
+                defaults = {**scope, "user": user}
                 connection.close()
                 connection = None
                 CONSOLE.histories.clear()
