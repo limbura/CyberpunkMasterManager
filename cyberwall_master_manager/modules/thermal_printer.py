@@ -20,6 +20,7 @@ class PrinterStatus:
     detail: str = ''
     busy: bool = False
     calibration: bool = False
+    label_state: str = 'disconnected'
 
 
 class ThermalPrinterService:
@@ -79,7 +80,8 @@ class ThermalPrinterService:
             self._single_printer = api.LabelPrinter(
                 timini_path=(self.config_path.parent / path).resolve() if path else None,
                 media=media, settings=api.LabelSettings(**self.settings['labels']),
-                scan_timeout=self.settings['scan_timeout_seconds'])
+                scan_timeout=self.settings['scan_timeout_seconds'],
+                on_event=lambda event: self._update(label_state=event['state']))
             # Standard batches use TiMini's ordinary continuous-feed recipe.
             media = replace(media, paper_type=api.PaperType.CONTINUOUS)
         self._standard_printer = api.Printer(backend, media=media)
@@ -265,6 +267,21 @@ class ThermalPrinterService:
                     self._retry_later()
                     raise RuntimeError('Передача прервана. Часть серии могла напечататься. Автоматического повтора не будет.') from error
                 raise
+        return self._submit(action, require_connected=True)
+
+    def move_paper(self, mm, *, reverse=False, removed=False):
+        from math import isfinite
+        if type(mm) not in (int, float) or not isfinite(mm) or not 0.25 <= mm <= 25:
+            raise ValueError('Расстояние: число от 0.25 до 25 мм.')
+        if reverse and not removed:
+            raise RemovalRequired('Сначала сними выданную этикетку.')
+        async def action():
+            if self._single_printer is None:
+                raise RuntimeError('Ручная подача требует режима labels.')
+            if not hasattr(self._single_printer, 'move_paper'):
+                raise RuntimeError('Обнови CyberpunkIdPrinter: требуется метод move_paper.')
+            await self._use_printer(self._single_printer)
+            await self._single_printer.move_paper(mm, reverse=reverse, removed=removed)
         return self._submit(action, require_connected=True)
 
     def calibrate(self):

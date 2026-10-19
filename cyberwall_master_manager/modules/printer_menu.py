@@ -66,15 +66,80 @@ def print_label(service, account_id=None, name=None, *, mode='id-name', copies=1
     print(f'Серия отправлена: {result.copies} экз. Физическое завершение печати не подтверждается.')
 
 
-def choose_label_mode(ask):
+LABEL_STATES = {'disconnected': 'Нет соединения', 'unknown': 'Положение неизвестно',
+                'ready': 'Готово к печати', 'presented': 'Напечатано'}
+
+
+def show_print_status(service):
+    if service is None:
+        print('Принтер: не запущен\nПечать: Нет соединения')
+        return
+    status = service.status
+    print(f"Принтер: {STATES.get(status.state, status.state)}")
+    state = getattr(status, 'label_state', 'disconnected')
+    print(f"Печать: {LABEL_STATES.get(state, state)}")
+
+
+def print_actions():
+    print('1 — ID и имя\n2 — только ID\n3 — калибровка этикеток')
+    print('4 <mm> — подать бумагу вперёд на <mm> мм')
+    print('5 <mm> — подать бумагу назад на <mm> мм (только со снятой этикеткой!)')
+    print('0, Enter, :b — назад')
+
+
+def maintenance(service, choice, ask):
+    parts = choice.split()
+    if not parts or parts[0] not in ('3', '4', '5'):
+        return False
+    if service is None:
+        print('Сервис термопринтера не запущен.')
+        return True
+    if parts[0] == '3':
+        if len(parts) != 1:
+            print('Калибровка: введи 3 без аргументов.')
+            return True
+        try:
+            wait(service.calibrate())
+            print('Калибровка выполнена.')
+        except Exception as error:
+            print(f'Печать: {safe(error)}')
+        return True
+    try:
+        from math import isfinite
+        if len(parts) != 2:
+            raise ValueError('Введи команду и расстояние, например: 4 10 или 5 10.')
+        mm = float(parts[1].replace(',', '.'))
+        if not isfinite(mm) or not 0.25 <= mm <= 25:
+            raise ValueError('Расстояние: от 0.25 до 25 мм.')
+    except ValueError as error:
+        print(safe(error))
+        return True
+    reverse = parts[0] == '5'
+    if reverse:
+        answer = ask('Сними выданные этикетки и закрой крышку. Enter — снято, втянуть; :b — отмена: ').strip()
+        if answer:
+            print('Перемещение отменено.')
+            return True
+    try:
+        wait(service.move_paper(mm, reverse=reverse, removed=reverse))
+        print('Бумага перемещена. Положение неизвестно.')
+    except Exception as error:
+        print(f'Печать: {safe(error)}')
+    return True
+
+
+def choose_label_mode(ask, service=None):
     while True:
         print('\nПЕЧАТЬ НАКЛЕЙКИ ID')
-        print('1 — ID и имя\n2 — только ID\n0, Enter, :b — назад')
+        show_print_status(service)
+        print_actions()
         choice = ask('Вариант: ').strip().lower()
         if choice in ('', '0', ':b'):
             return None
         if choice in ('1', '2'):
             return 'id-name' if choice == '1' else 'id-only'
+        if maintenance(service, choice, ask):
+            continue
         print('Введи номер пункта меню.')
 
 
@@ -83,11 +148,15 @@ def templates(service, ask):
         show_status(service)
         return
     while True:
-        print('\nПечать шаблонов:')
-        print('1 — ID и имя\n2 — только ID\n0, Enter, :b — назад')
+        print()
+        show_print_status(service)
+        print('Печать шаблонов:')
+        print_actions()
         choice = ask('Шаблон: ').strip().lower()
         if choice in ('', '0', ':b'):
             return
+        if maintenance(service, choice, ask):
+            continue
         if choice not in ('1', '2'):
             continue
         limit = service.settings['max_copies']
@@ -110,7 +179,7 @@ def printer_menu(service, ask):
         if service is None or service.status.state in ('disabled', 'unavailable', 'stopped'):
             return
         print('1 — найти и выбрать термопринтер\n2 — подключиться к последнему\n3 — отключиться')
-        print('4 — калибровка этикеток\n0, Enter, :b — назад')
+        print('0, Enter, :b — назад')
         choice = ask('Действие: ').strip().lower()
         if choice in ('', '0', ':b'):
             return
@@ -138,11 +207,5 @@ def printer_menu(service, ask):
                 wait(service.reconnect())
             elif choice == '3':
                 wait(service.disconnect())
-            elif choice == '4':
-                if service.settings['paper']['type'] != 'labels':
-                    print('Калибровка требует printer.paper.type = "labels" в config.toml.')
-                else:
-                    wait(service.calibrate())
-                    print('Калибровка выполнена.')
         except (RuntimeError, ValueError, OSError, ImportError) as error:
             print(f'Термопринтер: {safe(error)}')

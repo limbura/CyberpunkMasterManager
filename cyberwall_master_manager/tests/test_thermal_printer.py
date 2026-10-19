@@ -291,3 +291,36 @@ class RemovalMenuTests(unittest.TestCase):
             self.assertEqual(service.print_label.call_count, count)
             if count == 2:
                 self.assertTrue(service.print_label.call_args.kwargs['removed'])
+
+class MaintenanceMenuTests(unittest.TestCase):
+    def test_reverse_confirmation_and_cancel(self):
+        from concurrent.futures import Future
+        for answer, expected in [('', 1), (':b', 0)]:
+            service = Mock()
+            future = Future()
+            future.set_result(None)
+            service.move_paper.return_value = future
+            with contextlib.redirect_stdout(io.StringIO()):
+                printer_menu.maintenance(service, '5 10', Mock(return_value=answer))
+            self.assertEqual(service.move_paper.call_count, expected)
+            if expected:
+                service.move_paper.assert_called_once_with(10.0, reverse=True, removed=True)
+
+    def test_invalid_motion_never_sent(self):
+        service = Mock()
+        with contextlib.redirect_stdout(io.StringIO()):
+            for command in ('4', '5 nan', '4 26', '5 -1', '4 10 extra'):
+                printer_menu.maintenance(service, command, Mock())
+        service.move_paper.assert_not_called()
+
+    def test_account_menu_keeps_open_after_calibration(self):
+        from concurrent.futures import Future
+        future = Future()
+        future.set_result(None)
+        service = Mock(status=SimpleNamespace(state='connected', label_state='ready'))
+        service.calibrate.return_value = future
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            mode = printer_menu.choose_label_mode(Mock(side_effect=['3', '1']), service)
+        self.assertEqual(mode, 'id-name')
+        service.calibrate.assert_called_once()
+        self.assertIn('Печать: Готово к печати', out.getvalue())
