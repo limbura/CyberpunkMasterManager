@@ -53,6 +53,7 @@ class ThermalPrinterService:
         self._render = None
         self._unsupported_name_warning = None
         self._truncated_name_warning = None
+        self._invalid_name_warning = None
         self._wanted = self.settings['auto_connect']
         self._closing = False
         self._next_attempt = 0.0
@@ -81,6 +82,7 @@ class ThermalPrinterService:
             raise RuntimeError('Обнови cyberwall_id_printer до версии 0.3.0 или новее.')
         self._unsupported_name_warning = getattr(api, 'UnsupportedNameCharactersWarning', None)
         self._truncated_name_warning = getattr(api, 'NameTruncatedWarning', None)
+        self._invalid_name_warning = getattr(api, 'InvalidNameWarning', None)
         paper = dict(self.settings['paper'])
         paper['paper_type'] = paper.pop('type')
         path = '' if getattr(sys, 'frozen', False) else self.settings['timini_path']
@@ -315,6 +317,8 @@ class ThermalPrinterService:
                      'В имени обнаружены недопустимые символы, они заменены на нижнее подчеркивание'),
                     (self._truncated_name_warning,
                      'В имени более трех слов или есть слова более 11 символов - не помещающиеся символы и слова обрезаны'),
+                    (self._invalid_name_warning,
+                     'Имя пустое, не корректное, не заполнено или состоит из пробелов - не будет напечатано'),
                 ) if category is not None
             }
             categories = tuple(messages)
