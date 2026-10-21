@@ -13,6 +13,12 @@ class UnsupportedNameCharactersWarning(UserWarning):
     pass
 
 
+class NameTruncatedWarning(UserWarning):
+    pass
+
+
+TRUNCATED_MESSAGE = 'В имени более трех слов или есть слова более 11 символов - не помещающиеся символы и слова обрезаны'
+
 MESSAGE = 'В имени обнаружены недопустимые символы, они заменены на нижнее подчеркивание'
 
 
@@ -51,6 +57,38 @@ class WarningTests(unittest.IsolatedAsyncioTestCase):
             await service.print_label('123456789', 'А')
             self.assertEqual(service.status.print_warnings, ())
 
+    async def test_truncation_alone_and_with_unsupported_characters(self):
+        for labels in (False, True):
+            for combined in (False, True):
+                service = ThermalPrinterService({}, '/tmp/config.toml')
+                service._unsupported_name_warning = UnsupportedNameCharactersWarning
+                service._truncated_name_warning = NameTruncatedWarning
+                service._update(state='connected')
+                service._submit = lambda action, **kw: action()
+                def render(*args, **kwargs):
+                    if combined:
+                        warnings.warn('unsupported', UnsupportedNameCharactersWarning)
+                    warnings.warn('truncated', NameTruncatedWarning)
+                    warnings.warn('truncated again', NameTruncatedWarning)
+                    return 'image'
+                async def print_id(*args, **kwargs):
+                    render()
+                    return SimpleNamespace(copies=1)
+                printer = SimpleNamespace(check_connection=AsyncMock(return_value=True),
+                    print_id=print_id, print_image=AsyncMock(return_value=SimpleNamespace(copies=1)),
+                    media=object())
+                service._printer = printer
+                if labels:
+                    service._single_printer = printer
+                    service._render = render
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter('always')
+                    result = await service.print_label('123456789', 'А' * 12)
+                self.assertEqual(result.copies, 1)
+                self.assertEqual(caught, [])
+                self.assertEqual(service.status.print_warnings,
+                                 (MESSAGE, TRUNCATED_MESSAGE) if combined else (TRUNCATED_MESSAGE,))
+
     async def test_unrelated_warning_and_error_are_preserved(self):
         service = ThermalPrinterService({}, '/tmp/config.toml')
         service._unsupported_name_warning = UnsupportedNameCharactersWarning
@@ -73,7 +111,7 @@ class WarningTests(unittest.IsolatedAsyncioTestCase):
 class MenuWarningTests(unittest.TestCase):
     def test_message_once_per_user_print_including_removal_retry(self):
         for retry in (False, True):
-            service = SimpleNamespace(status=SimpleNamespace(print_warnings=(MESSAGE,)))
+            service = SimpleNamespace(status=SimpleNamespace(print_warnings=(MESSAGE, TRUNCATED_MESSAGE)))
             success = Future()
             success.set_result(SimpleNamespace(copies=1))
             pending = Future()
@@ -83,4 +121,5 @@ class MenuWarningTests(unittest.TestCase):
                 self.assertTrue(printer_menu.print_label(service, '123456789', 'А@',
                                                         ask=lambda _: ''))
             self.assertEqual(output.getvalue().count(MESSAGE), 1)
+            self.assertEqual(output.getvalue().count(TRUNCATED_MESSAGE), 1)
             self.assertIn('Серия отправлена', output.getvalue())

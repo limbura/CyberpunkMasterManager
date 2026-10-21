@@ -52,6 +52,7 @@ class ThermalPrinterService:
         self._removal_error = RemovalRequired
         self._render = None
         self._unsupported_name_warning = None
+        self._truncated_name_warning = None
         self._wanted = self.settings['auto_connect']
         self._closing = False
         self._next_attempt = 0.0
@@ -79,6 +80,7 @@ class ThermalPrinterService:
         if not hasattr(api.Printer, 'check_connection'):
             raise RuntimeError('Обнови cyberwall_id_printer до версии 0.3.0 или новее.')
         self._unsupported_name_warning = getattr(api, 'UnsupportedNameCharactersWarning', None)
+        self._truncated_name_warning = getattr(api, 'NameTruncatedWarning', None)
         paper = dict(self.settings['paper'])
         paper['paper_type'] = paper.pop('type')
         path = '' if getattr(sys, 'frozen', False) else self.settings['timini_path']
@@ -307,22 +309,31 @@ class ThermalPrinterService:
                 raise
         async def capture_warnings():
             self._update(print_warnings=())
-            category = self._unsupported_name_warning
-            if category is None:
+            messages = {
+                category: message for category, message in (
+                    (self._unsupported_name_warning,
+                     'В имени обнаружены недопустимые символы, они заменены на нижнее подчеркивание'),
+                    (self._truncated_name_warning,
+                     'В имени более трех слов или есть слова более 11 символов - не помещающиеся символы и слова обрезаны'),
+                ) if category is not None
+            }
+            categories = tuple(messages)
+            if not categories:
                 return await action()
             caught = []
             try:
                 with warnings.catch_warnings(record=True) as caught:
-                    warnings.simplefilter('always', category)
+                    for category in categories:
+                        warnings.simplefilter('always', category)
                     return await action()
             finally:
-                if any(issubclass(item.category, category) for item in caught):
-                    self._update(print_warnings=(
-                        'В имени обнаружены недопустимые символы, они заменены на нижнее подчеркивание',
-                    ))
+                self._update(print_warnings=tuple(
+                    message for category, message in messages.items()
+                    if any(issubclass(item.category, category) for item in caught)
+                ))
                 # Replay unrelated warnings after restoring the caller's handler.
                 for item in caught:
-                    if not issubclass(item.category, category):
+                    if not issubclass(item.category, categories):
                         warnings.showwarning(item.message, item.category, item.filename,
                                              item.lineno, file=item.file, line=item.line)
         return self._submit(capture_warnings, require_connected=True)
