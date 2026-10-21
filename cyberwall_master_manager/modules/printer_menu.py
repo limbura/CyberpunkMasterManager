@@ -40,10 +40,21 @@ def wait(future):
 
 
 def print_label(service, account_id=None, name=None, *, mode='id-name', copies=1, ask=input):
+    displayed_warnings = set()
+
     def send(**kwargs):
         if service is None:
             raise RuntimeError('Сервис термопринтера не запущен.')
-        return wait(service.print_label(account_id, name, mode=mode, copies=copies, **kwargs))
+        future = service.print_label(account_id, name, mode=mode, copies=copies, **kwargs)
+        try:
+            return wait(future)
+        finally:
+            messages = getattr(service.status, 'print_warnings', ())
+            if isinstance(messages, tuple):
+                for message in messages:
+                    if message not in displayed_warnings:
+                        print(message)
+                        displayed_warnings.add(message)
 
     print(f'Передача на термопринтер: {copies} экз. …')
     try:
@@ -214,3 +225,4 @@ def printer_menu(service, ask):
                 wait(service.disconnect())
         except (RuntimeError, ValueError, OSError, ImportError) as error:
             print(f'Термопринтер: {safe(error)}')
+

@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 import sys
 import threading
+import warnings
 
 from .printer_settings import printer_settings, save_printer
 
@@ -23,6 +24,7 @@ class PrinterStatus:
     label_state: str = 'disconnected'
     device_status: str = 'unknown'
     last_error: str = ''
+    print_warnings: tuple[str, ...] = ()
 
 
 DEVICE_STATES = {'unknown': 'неизвестно', 'normal': 'готов', 'paper_out': 'нет бумаги',
@@ -49,6 +51,7 @@ class ThermalPrinterService:
         self._single_printer = self._standard_printer = None
         self._removal_error = RemovalRequired
         self._render = None
+        self._unsupported_name_warning = None
         self._wanted = self.settings['auto_connect']
         self._closing = False
         self._next_attempt = 0.0
@@ -75,6 +78,7 @@ class ThermalPrinterService:
         import cyberwall_id_printer as api
         if not hasattr(api.Printer, 'check_connection'):
             raise RuntimeError('Обнови cyberwall_id_printer до версии 0.3.0 или новее.')
+        self._unsupported_name_warning = getattr(api, 'UnsupportedNameCharactersWarning', None)
         paper = dict(self.settings['paper'])
         paper['paper_type'] = paper.pop('type')
         path = '' if getattr(sys, 'frozen', False) else self.settings['timini_path']
@@ -301,7 +305,27 @@ class ThermalPrinterService:
                     self._retry_later()
                     raise RuntimeError('Передача прервана. Часть серии могла напечататься. Автоматического повтора не будет.') from error
                 raise
-        return self._submit(action, require_connected=True)
+        async def capture_warnings():
+            self._update(print_warnings=())
+            category = self._unsupported_name_warning
+            if category is None:
+                return await action()
+            caught = []
+            try:
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter('always', category)
+                    return await action()
+            finally:
+                if any(issubclass(item.category, category) for item in caught):
+                    self._update(print_warnings=(
+                        'В имени обнаружены недопустимые символы, они заменены на нижнее подчеркивание',
+                    ))
+                # Replay unrelated warnings after restoring the caller's handler.
+                for item in caught:
+                    if not issubclass(item.category, category):
+                        warnings.showwarning(item.message, item.category, item.filename,
+                                             item.lineno, file=item.file, line=item.line)
+        return self._submit(capture_warnings, require_connected=True)
 
     def move_paper(self, mm, *, reverse=False, removed=False):
         from math import isfinite
@@ -356,3 +380,4 @@ class ThermalPrinterService:
         finally:
             self._loop.call_soon_threadsafe(self._loop.stop)
             self._thread.join()
+
