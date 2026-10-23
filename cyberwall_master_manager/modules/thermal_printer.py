@@ -91,8 +91,9 @@ class ThermalPrinterService:
             blackening=self.settings['blackening'], timeout=self.settings['scan_timeout_seconds'])
         media = api.MediaConfig(**paper)
         if paper['paper_type'] == 'labels':
-            if not hasattr(api, 'LabelPrinter') or not hasattr(api, 'DeviceStatusError'):
-                raise RuntimeError('Обнови CyberpunkIdPrinter: требуются LabelPrinter и DeviceStatusError.')
+            if (not hasattr(api, 'LabelPrinter') or not hasattr(api, 'DeviceStatusError')
+                    or not hasattr(api.LabelPrinter, 'print_copies')):
+                raise RuntimeError('Обнови CyberpunkIdPrinter: требуется LabelPrinter с методом print_copies.')
             from cyberwall_id_printer.layout import render_for_head
             self._render = render_for_head
             self._removal_error = api.RemovalRequired
@@ -102,8 +103,7 @@ class ThermalPrinterService:
                 scan_timeout=self.settings['scan_timeout_seconds'],
                 on_event=lambda event: self._update(label_state=event['state'],
                     device_status=event.get('device_status', 'unknown')))
-            # Standard batches use TiMini's ordinary continuous-feed recipe.
-            media = replace(media, paper_type=api.PaperType.CONTINUOUS)
+            return backend, self._single_printer
         self._standard_printer = api.Printer(backend, media=media)
         return backend, self._single_printer or self._standard_printer
 
@@ -285,18 +285,19 @@ class ThermalPrinterService:
                 raise RuntimeError('Связь потеряна. Повтори печать вручную после подключения.')
             try:
                 if self._single_printer is not None:
-                    target = self._single_printer if copies == 1 else self._standard_printer
+                    target = self._single_printer
                     await self._use_printer(target)
-                    if target is self._single_printer:
-                        image = self._render(account_id, name, target.media, 384, mode=mode,
-                            inactive=True if mode.startswith('blank-') else self.settings['layout']['inactive_segments'],
-                            decorations=self.settings['layout']['decorations'])
-                        if removed:
-                            await target.confirm_removed()
-                        try:
-                            return await target.print_image(image)
-                        except self._removal_error as error:
-                            raise RemovalRequired('Сними выданную наклейку перед обратным втягиванием.') from error
+                    image = self._render(account_id, name, target.media, 384, mode=mode,
+                        inactive=True if mode.startswith('blank-') else self.settings['layout']['inactive_segments'],
+                        decorations=self.settings['layout']['decorations'])
+                    if removed:
+                        await target.confirm_removed()
+                    try:
+                        if copies > 1:
+                            return await target.print_copies(image, copies=copies)
+                        return await target.print_image(image)
+                    except self._removal_error as error:
+                        raise RemovalRequired('Сними выданную наклейку перед обратным втягиванием.') from error
                 return await self._printer.print_id(account_id, name, mode=mode, copies=copies,
                     inactive=True if mode.startswith('blank-') else self.settings['layout']['inactive_segments'],
                     decorations=self.settings['layout']['decorations'])

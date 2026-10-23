@@ -13,7 +13,7 @@ DEFAULTS = {
     'library_path': '../../CyberpunkIdPrinter', 'timini_path': '../../TiMini-Print',
     'paper': {'type': 'continuous', 'roll_width_mm': 57.0, 'width_mm': 40.0,
               'height_mm': 30.0, 'offset_x_mm': 0.0, 'dpi': 203.2},
-    'labels': {'feed_mm': 15.0, 'retract_mm': 25.0, 'position_timeout': 20.0,
+    'labels': {'feed_mm': 15.0, 'retract_mm': 25.0, 'gap_mm': 2.0, 'position_timeout': 20.0,
                'settle_seconds': 3.0, 'motion_settle_seconds': 5.0},
     'layout': {'inactive_segments': True, 'decorations': True},
 }
@@ -51,7 +51,7 @@ def printer_settings(raw):
         value = labels[key]
         if type(value) not in (int, float) or not isfinite(value) or value <= 0:
             raise ValueError(f'[printer.labels] {key}: положительное конечное число.')
-        if key in ('feed_mm', 'retract_mm') and not 0.25 <= value <= 25:
+        if key in ('feed_mm', 'retract_mm', 'gap_mm') and not 0.25 <= value <= 25:
             raise ValueError(f'[printer.labels] {key}: число 0.25…25 мм.')
         if key in ('settle_seconds', 'motion_settle_seconds') and value < 2:
             raise ValueError(f'[printer.labels] {key}: не менее 2 секунд.')

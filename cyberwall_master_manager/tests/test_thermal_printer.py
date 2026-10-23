@@ -239,6 +239,7 @@ class LabelRoutingTests(unittest.IsolatedAsyncioTestCase):
             media=object(), connect=AsyncMock(return_value=SimpleNamespace(address='A', name='P', calibration=False)),
             disconnect=AsyncMock(), check_connection=AsyncMock(return_value=True),
             print_image=AsyncMock(return_value=SimpleNamespace(copies=1)),
+            print_copies=AsyncMock(return_value=SimpleNamespace(copies=3)),
             confirm_removed=AsyncMock(), recover=AsyncMock())
         self.service = ThermalPrinterService({}, '/tmp/config.toml')
         self.service._single_printer = self.single
@@ -248,18 +249,29 @@ class LabelRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.service._update(state='connected', address='A')
         self.service._submit = lambda action, **kwargs: action()
 
-    async def test_single_batch_single_switches_sessions(self):
+    async def test_single_batch_single_keeps_label_session(self):
         service = self.service
         await service.print_label('123456789', mode='id-only')
         self.single.print_image.assert_awaited_once_with('image')
         self.single.confirm_removed.assert_not_awaited()
         await service.print_label(mode='blank-id-only', copies=3)
-        self.assertEqual(self.standard.jobs[0][2]['copies'], 3)
-        self.single.disconnect.assert_awaited()
+        self.single.print_copies.assert_awaited_once_with('image', copies=3)
+        self.assertEqual(self.standard.jobs, [])
         await service.print_label(mode='blank-id-name')
-        self.single.connect.assert_awaited_once_with('A')
-        self.assertFalse(self.standard.alive)
+        self.single.connect.assert_not_awaited()
+        self.single.disconnect.assert_not_awaited()
         self.assertEqual(self.single.print_image.await_count, 2)
+
+    async def test_batch_requires_removal_before_reverse(self):
+        from modules.thermal_printer import RemovalRequired
+        self.single.print_copies.side_effect = [RemovalRequired(), SimpleNamespace(copies=3)]
+        with self.assertRaises(RemovalRequired):
+            await self.service.print_label(mode='blank-id-name', copies=3)
+        self.single.confirm_removed.assert_not_awaited()
+        result = await self.service.print_label(mode='blank-id-name', copies=3, removed=True)
+        self.single.confirm_removed.assert_awaited_once()
+        self.assertEqual(result.copies, 3)
+        self.assertEqual(self.standard.jobs, [])
 
     async def test_confirmation_only_after_explicit_user_action(self):
         from modules.thermal_printer import RemovalRequired

@@ -17,13 +17,15 @@ class LabelSettingsTests(unittest.TestCase):
         settings = printer_settings({'labels': {'feed_mm': 10}})
         self.assertEqual(settings['labels']['feed_mm'], 10)
         self.assertEqual(settings['labels']['retract_mm'], 25)
+        self.assertEqual(settings['labels']['gap_mm'], 2)
         self.assertEqual(printer_settings({})['labels']['feed_mm'], 15)
 
     def test_invalid_values(self):
         for key, value in [('feed_mm', 26), ('retract_mm', 0),
                            ('settle_seconds', 1), ('motion_settle_seconds', True),
                            ('position_timeout', float('nan')), ('position_timeout', '20'),
-                           ('unknown', 3)]:
+                           ('gap_mm', 0), ('gap_mm', 26), ('gap_mm', True),
+                           ('gap_mm', float('inf')), ('gap_mm', '2'), ('unknown', 3)]:
             with self.subTest(key=key, value=value), self.assertRaises(ValueError):
                 printer_settings({'labels': {key: value}})
 
@@ -31,7 +33,7 @@ class LabelSettingsTests(unittest.TestCase):
         @dataclass
         class Media:
             paper_type: str
-        values = dict(feed_mm=10, retract_mm=12, position_timeout=30,
+        values = dict(feed_mm=10, retract_mm=12, gap_mm=3, position_timeout=30,
                       settle_seconds=2, motion_settle_seconds=4)
         api = SimpleNamespace(Printer=Mock(), TiMiniBackend=Mock(),
             MediaConfig=lambda **kw: Media(kw['paper_type']),
