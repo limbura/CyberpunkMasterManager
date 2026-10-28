@@ -289,7 +289,7 @@ def build(reader=None, output=None, *, printer=None, timini=None, no_install=Fal
     output = Path(output or APP_DIR.parent / "builds" / f"{APP_NAME}_v{version}_windows_x64.zip").resolve()
     if output.exists():
         raise ValueError(f"Архив уже существует: {output}. Укажи новое имя.")
-    config = portable_config((APP_DIR / "config.toml").read_text(encoding="utf-8"))
+    # config = portable_config((APP_DIR / "config.toml").read_text(encoding="utf-8"))
     print(f"Сборка {version}\n"
           f"Библиотека считывателя (wcopy_reader) {reader_version}: {reader}\n"
           f"Библиотека принтера (cyberwall_id_printer) {printer_version}: {printer}\n"
@@ -310,6 +310,23 @@ def build(reader=None, output=None, *, printer=None, timini=None, no_install=Fal
             print("Используем заранее подготовленное окружение; pip не запускается.", flush=True)
         run([python, "-c", "import PyInstaller, pymysql, hid, cryptography, tomlkit, cyberwall_id_printer, bleak; "
              "assert cyberwall_id_printer.__version__ == __import__('sys').argv[1]", printer_version])
+        # Формируем конфигурацию в сборочном Python,
+        # где tomlkit уже установлен.
+        config = run(
+            [
+                python,
+                "-c",
+                "from pathlib import Path; import sys; "
+                "from build_release import portable_config; "
+                "print(portable_config("
+                "Path(sys.argv[1]).read_text(encoding='utf-8')), end='')",
+                APP_DIR / "config.toml",
+            ],
+            cwd=APP_DIR,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        ).stdout
         src = work / "src"
         stage_source(reader, src)
         manifest = work / "cyberwall_timini.json"
