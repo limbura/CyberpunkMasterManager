@@ -100,7 +100,7 @@ exit /b 1
 :find_python
 set "PYTHON_EXE="
 set "PYTHON_ARGS="
-call :try_python "py" "-3"
+call :try_python "py" "-3.14"
 if defined PYTHON_EXE exit /b 0
 
 rem Проверяем стандартные места установки, включая только что установленный Python.
