@@ -10,6 +10,8 @@ import sys
 import time
 import uuid
 
+from . import printer_menu
+
 READY = {"written", "already"}
 STATES = READY | {"pending", "skipped", "error", "writing", "missing"}
 TITLES = {"pending": "Ожидает записи", "skipped": "Пропущен", "error": "Нужна повторная проверка",
@@ -85,7 +87,7 @@ class Journal:
         rows = sorted(rows, key=lambda row: row["card_id"])
         if not rows:
             raise BatchError("В БД нет аккаунтов для записи.")
-        data = {"format": 1, "scope": scope, "created": now(),
+        data = {"format": 2, "scope": scope, "created": now(),
                 "accounts": [dict(identity(row), status="pending") for row in rows],
                 "current": rows[0]["card_id"], "remove_uid": None, "uids": {}, "history": []}
         journal = cls(path, data)
@@ -98,13 +100,17 @@ class Journal:
             data = json.loads(Path(path).read_text(encoding="utf-8"))
             journal = cls(path, data)
             journal.validate(scope)
+            if data["format"] == 1:
+                data["format"] = 2
+                if data["remove_uid"] and journal.current()["status"] in READY:
+                    journal.current()["label_phase"] = "needed"
             return journal
         except (ValueError, KeyError, TypeError, AttributeError) as error:
             raise BatchError(f"Журнал не загружен: {error} Он не будет перезаписан.") from error
 
     def validate(self, scope):
         d = self.data
-        if d["format"] != 1 or d["scope"] != scope:
+        if d["format"] not in (1, 2) or d["scope"] != scope:
             raise BatchError("Другая версия журнала или другое подключение к БД.")
         rows = d["accounts"]
         if not isinstance(rows, list) or not rows:
@@ -115,6 +121,10 @@ class Journal:
                     or type(row["id"]) is not int or not 100000000 <= row["id"] <= 999999999
                     or not isinstance(row["name"], str) or row["status"] not in STATES):
                 raise BatchError("Некорректная запись аккаунта в журнале.")
+            if "label_phase" in row and (row["label_phase"] not in ("needed", "sending", "sent")
+                    or row["status"] not in READY or row["card_id"] != d["current"]
+                    or not d["remove_uid"] or d["remove_uid"] != row.get("uid")):
+                raise BatchError("Некорректный этап печати наклейки в журнале.")
             ids.append(row["card_id"])
         if ids != sorted(set(ids)) or (d["current"] is not None and d["current"] not in ids):
             raise BatchError("Некорректный порядок или текущий card_id.")
@@ -168,6 +178,7 @@ class Journal:
         row["status"] = status
         row.pop("error", None)
         self.data["remove_uid"] = row["uid"]
+        row["label_phase"] = "needed"
         self.event(row, status, uid=row["uid"])
         self.save()
 
@@ -187,7 +198,7 @@ def header(journal, row, message=""):
              ":skip — пропустить   :card N — к card_id   :id N — к ID",
              ":skipped — пропущенные   :report — итоги   :next — дальше",
              ":r — разрешить повтор   :b — сохранить и выйти", "",
-             "Подпиши наклейку, положи карту и введи ID С НАКЛЕЙКИ."]
+             "Приложи карту для записи."]
     for line in lines:
         print(line[:width])  # Каждое поле занимает ровно одну строку.
 
@@ -232,22 +243,27 @@ def wait_removed(reader, journal):
 def sync_account(db, journal, row):
     current = db.batch_account(row["card_id"])
     if current is None:
+        row.pop("label_phase", None)
         row["status"] = "missing"
         journal.save()
         return "Аккаунт удалён из БД. Можно пропустить его."
     if identity(current) != identity(row):
-        row.update(identity(current), status="pending")
+        if row.get("label_phase") and journal.data["remove_uid"]:
+            row.update(identity(current), label_phase="needed")
+        else:
+            row.update(identity(current), status="pending")
         journal.event(row, "account_changed")
         journal.save()
-        return "Данные в БД изменились. Исправь наклейку и заново подтверди ID."
+        return "Данные в БД изменились. Проверь новые ID и имя."
     if row["status"] == "missing":
         row["status"] = "pending"
         journal.save()
     return ""
 
 
-def attempt(db, journal, row, reader, ask, beep_t):
-    card = scan(reader)
+def attempt(db, journal, row, reader, ask, beep_t, card=None):
+    if card is None:
+        card = scan(reader)
     uid_owner = journal.data["uids"].get(card.uid.hex())
     if uid_owner is not None and uid_owner != row["card_id"]:
         raise BatchError(f"Этот UID уже использовался для card_id {uid_owner}. Возьми другую карту.")
@@ -287,7 +303,7 @@ def attempt(db, journal, row, reader, ask, beep_t):
         reader.beep(t=beep_t)
     except reader.RFIDError as error:
         warning = " Проверка успешна, но писк не сработал: " + safe(error)
-    return "Сверь имя и ID на наклейке." + warning
+    return "Карта проверена." + warning
 
 
 def report(journal, only_skipped=False):
@@ -300,19 +316,69 @@ def report(journal, only_skipped=False):
     print("\nПолный журнал: " + str(journal.path))
 
 
-def process(db, journal, reader, ask=input, beep_t=10):
+def confirm_label(journal, row, printer, ask, *, send_now, previous_removed=False):
+    # Перед отправкой сохраняем неопределённый результат на случай обрыва связи.
+    while True:
+        if send_now:
+            row["label_phase"] = "sending"
+            journal.save()
+            sent = printer_menu.print_label(printer, str(row["id"]), row["name"], ask=ask, previous_removed=previous_removed)
+            previous_removed = False
+            row["label_phase"] = "sent" if sent else "needed"
+            journal.save()
+        can_confirm = row["label_phase"] in ("sending", "sent")
+        prompt = ("Наклейка напечаталась и приклеена к этой карте? 1 — да; " if can_confirm
+                  else "Нужна печать наклейки. ")
+        answer = ask(prompt + "2 — повторить печать; :b — сохранить и выйти: ").strip().lower()
+        if answer in (":b", ":q"):
+            return False
+        if answer == "1" and can_confirm:
+            row.pop("label_phase")
+            journal.event(row, "label_attached", uid=row["uid"])
+            journal.save()
+            return True
+        send_now = answer == "2"
+
+
+def process(db, journal, reader, ask=input, beep_t=10, *, printer=None, read_card_or_command=None):
     message = ""
+    previous_removed = False
+
+    def poll_card():
+        try:
+            return scan(reader)
+        except reader.NoCardError:
+            return None
+
     while True:
         row = journal.current()
         if row:
             message = sync_account(db, journal, row) or message
         if journal.data["remove_uid"]:
             header(journal, row, message)
+            if row.get("label_phase"):
+                if not confirm_label(journal, row, printer, ask, send_now=False):
+                    return
+                previous_removed = True
             wait_removed(reader, journal)
             message = ""
             continue
         header(journal, row, message)
-        command = ask("ID с наклейки или команда: ").strip()
+        card = None
+        if read_card_or_command and row and row["status"] not in READY | {"missing", "error", "writing"}:
+            try:
+                value = read_card_or_command("Приложи карту или введи команду:", poll_card=poll_card)
+            except reader.RFIDError as error:
+                row["status"] = "error"
+                journal.save()
+                message = safe(error)
+                continue
+            if isinstance(value, str):
+                command = value.strip()
+            else:
+                card, command = value, ""
+        else:
+            command = ask("Enter — проверить карту, или введи команду: ").strip()
         lower = command.lower()
         message = ""
         if lower in (":b", ":q"):
@@ -352,15 +418,24 @@ def process(db, journal, reader, ask=input, beep_t=10):
                     row["status"] = "pending"
                     journal.event(row, "repeat_allowed")
                     journal.save()
-                    message = "Повтор разрешён. Проверь наклейку и введи ID заново."
+                    message = "Повтор разрешён. Приложи карту."
                 continue
             if row["status"] in READY:
                 raise BatchError("Аккаунт уже готов. Для повторной записи сначала выбери :r.")
             if row["status"] == "missing":
                 raise BatchError("Удалённый аккаунт записать нельзя.")
-            if number(command) != row["id"]:
-                raise BatchError("ID НЕ СОВПАЛ. Проверь наклейку; запись не выполнялась.")
-            message = attempt(db, journal, row, reader, ask, beep_t)
+            if command:
+                raise BatchError("Неизвестная команда.")
+            message = attempt(db, journal, row, reader, ask, beep_t, card)
+            if journal.data["remove_uid"]:
+                print(message)
+                if not confirm_label(journal, row, printer, ask, send_now=True, previous_removed=previous_removed):
+                    return
+                previous_removed = True
+            elif not command:
+                # После отмены не запрашиваем перезапись той же карты автоматически.
+                row["status"] = "error"
+                journal.save()
         except (BatchError, reader.RFIDError) as error:
             message = safe(error) + " Текущий аккаунт сохранён."
             if row:
@@ -370,7 +445,7 @@ def process(db, journal, reader, ask=input, beep_t=10):
                 journal.save()
 
 
-def run(db, console, path, scope, *, ask=input, beep_t=10):
+def run(db, console, path, scope, *, ask=input, beep_t=10, printer=None):
     try:
         with journal_lock(path), console.batch_mode() as reader:
             journal = Journal.load(path, scope) if Path(path).exists() else None
@@ -393,7 +468,7 @@ def run(db, console, path, scope, *, ask=input, beep_t=10):
             else:
                 return
             try:
-                process(db, journal, reader, ask, beep_t)
+                process(db, journal, reader, ask, beep_t, printer=printer, read_card_or_command=console.read)
             finally:
                 # Не перезаписываем журнал в finally: предыдущий сбой диска мог
                 # оставить только безопасное намерение вместо результата операции.

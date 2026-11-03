@@ -21,6 +21,7 @@ class BatchTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / 'batch_cards.json'
         self.j = b.Journal.create(self.path, SCOPE, [B, A]); self.j.save()
+        self.print_label = self.enterContext(patch.object(b.printer_menu, 'print_label', return_value=True))
         self.out = io.StringIO()
         redir = contextlib.redirect_stdout(self.out); redir.__enter__()
         self.addCleanup(redir.__exit__, None, None, None)
@@ -41,21 +42,49 @@ class BatchTests(unittest.TestCase):
     def ready(self):
         self.j.reserve(self.j.current(), card()); self.j.finish(self.j.current(), 'written')
 
-    def test_wrong_label_never_reads_or_writes_and_stays(self):
+    def test_numeric_input_is_not_a_write_command(self):
         self.commands(['987654321', ':b'])
         self.reader.read_card.assert_not_called(); self.reader.write_card_number.assert_not_called()
         self.assertEqual(self.load().data['current'], 1)
-        self.assertIn('ID НЕ СОВПАЛ', self.out.getvalue())
+        self.assertIn('Неизвестная команда', self.out.getvalue())
 
     def test_success_waits_for_removal_then_next_card_id(self):
         self.reader.read_card.side_effect = [card(), card(1), r.NoCardError('none', stage='poll'), r.NoCardError('none', stage='poll')]
-        self.commands(['123 456 789', ':b'])
+        self.commands(['', '1', ':b'])
+        self.print_label.assert_called_once()
+        self.assertEqual(self.print_label.call_args.args[1:], (str(A['id']), A['name']))
         self.reader.write_card_number.assert_called_once_with(1, expected_uid=b'abcd', expected_block=card().block)
         saved = self.load()
         self.assertEqual(saved.data['current'], 7)
         self.assertEqual(saved.data['uids'], {'61626364': 1})
         self.assertEqual(saved.data['accounts'][0]['status'], 'written')
         self.assertIsNone(saved.data['remove_uid'])
+
+    def test_old_journal_with_verified_card_resumes_at_print(self):
+        self.ready()
+        self.j.current().pop('label_phase')
+        self.j.data['format'] = 1
+        self.j.save()
+        restored = self.load()
+        self.assertEqual(restored.current()['label_phase'], 'needed')
+        self.assertEqual(restored.data['format'], 2)
+
+    def test_placement_print_failure_resume_and_confirmation(self):
+        self.print_label.side_effect = [False, True]
+        def on_placement(prompt, *, poll_card):
+            return poll_card()
+        b.process(self.db, self.j, self.reader, Mock(side_effect=['1', ':next', ':b']),
+                  read_card_or_command=on_placement)
+        self.assertEqual(self.load().current()['label_phase'], 'needed')
+        self.j = self.load()
+        self.commands(['2', ':skip', ':b'])
+        self.assertEqual(self.load().current()['label_phase'], 'sent')
+        self.j = self.load()
+        self.reader.read_card.side_effect = r.NoCardError('none', stage='poll')
+        self.commands(['1', ':b'])
+        self.assertEqual(self.load().data['current'], 7)
+        self.reader.write_card_number.assert_called_once()
+        self.assertEqual(self.print_label.call_count, 2)
 
     def test_unknown_number_requires_confirmation(self):
         self.reader.read_card.return_value = card(999)
@@ -124,7 +153,7 @@ class BatchTests(unittest.TestCase):
         self.assertIn('Пропуски card_id', self.out.getvalue())
 
     def test_completed_account_requires_explicit_repeat(self):
-        self.ready(); self.j.data['remove_uid'] = None; self.j.save()
+        self.ready(); self.j.current().pop('label_phase'); self.j.data['remove_uid'] = None; self.j.save()
         self.commands(['123456789', ':r', ':b'])
         self.reader.write_card_number.assert_not_called()
         self.assertEqual(self.load().current()['status'], 'pending')
@@ -138,7 +167,7 @@ class BatchTests(unittest.TestCase):
 
     def test_guard_rejects_change_after_label_confirmation(self):
         self.db.batch_guard.side_effect = b.BatchError('аккаунт изменён')
-        self.commands(['123456789', ':b'])
+        self.commands(['', ':b'])
         self.reader.write_card_number.assert_not_called()
         self.assertFalse(self.load().data['uids'])
 
@@ -218,7 +247,7 @@ class BatchTests(unittest.TestCase):
         self.j.reserve(self.j.current(), card())
         self.j = self.load()
         self.reader.read_card.side_effect = [card(1), card(1), r.NoCardError('no', stage='poll'), r.NoCardError('no', stage='poll')]
-        self.commands(['123456789', ':b'])
+        self.commands(['', '1', ':b'])
         self.reader.write_card_number.assert_not_called()
         self.assertEqual(self.load().data['accounts'][0]['status'], 'already')
         self.assertEqual(self.load().data['current'], 7)
@@ -229,7 +258,7 @@ class BatchTests(unittest.TestCase):
         self.reader.read_card.side_effect = [r.NoCardError('no', stage='poll'), r.NoCardError('no', stage='poll')]
         self.commands(['123456789', ':b'])
         self.assertEqual(self.load().data['current'], 1)
-        self.assertNotIn(self.load().current()['status'], b.READY)
+        self.assertEqual(self.load().current()['label_phase'], 'needed')
         self.reader.write_card_number.assert_not_called()
 
     def test_deleted_account_cannot_be_written(self):

@@ -39,7 +39,7 @@ def wait(future):
             raise RuntimeError(str(error)) from error
 
 
-def print_label(service, account_id=None, name=None, *, mode='id-name', copies=1, ask=input):
+def print_label(service, account_id=None, name=None, *, mode='id-name', copies=1, ask=input, previous_removed=False):
     displayed_warnings = set()
 
     def send(**kwargs):
@@ -66,7 +66,7 @@ def print_label(service, account_id=None, name=None, *, mode='id-name', copies=1
         return False
     if result is None:
         # Navigation exceptions from ask must reach the application's main loop.
-        answer = ask('Сними все выданные наклейки и закрой крышку. Enter — снято, печатать; :b — отмена: ').strip().lower()
+        answer = '' if previous_removed else ask('Сними все выданные наклейки и закрой крышку. Enter — снято, печатать; :b — отмена: ').strip().lower()
         if answer:
             print('Печать отменена.')
             return False

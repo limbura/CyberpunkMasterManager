@@ -147,7 +147,7 @@ class CardConsole:
             if current == epoch:
                 return value
 
-    def read(self, prompt, allow_card=False, history=None):
+    def read(self, prompt, allow_card=False, history=None, *, poll_card=None):
         # История только в памяти; None полностью отключает её для этого поля.
         entries = self.histories.setdefault(history, []) if history is not None else None
         epoch = self._start_scan() if allow_card and self.enabled and sys.stdin.isatty() else None
@@ -155,9 +155,9 @@ class CardConsole:
             if not sys.stdin.isatty():
                 value = input(prompt)
             elif os.name == "nt":
-                value = self._windows_read(prompt, epoch, entries)
+                value = self._windows_read(prompt, epoch, entries, poll_card=poll_card)
             else:
-                value = self._posix_read(prompt, epoch, entries)
+                value = self._posix_read(prompt, epoch, entries, poll_card=poll_card)
             if isinstance(value, str) and entries is not None and value.strip():
                 if not entries or entries[-1] != value:
                     entries.append(value)
@@ -167,7 +167,7 @@ class CardConsole:
             if epoch is not None:
                 self._stop_scan()
 
-    def _windows_read(self, prompt, epoch, entries=None):
+    def _windows_read(self, prompt, epoch, entries=None, *, poll_card=None):
         from .windows_console import WindowsConsoleInput
         try:
             keyboard = WindowsConsoleInput()
@@ -176,9 +176,9 @@ class CardConsole:
             print("Расширенный ввод в этой консоли недоступен. Введи строку вручную.")
             return input(prompt)
         with keyboard:
-            return self._windows_edit(prompt, epoch, keyboard, entries)
+            return self._windows_edit(prompt, epoch, keyboard, entries, poll_card=poll_card)
 
-    def _windows_edit(self, prompt, epoch, keyboard, entries=None):
+    def _windows_edit(self, prompt, epoch, keyboard, entries=None, *, poll_card=None):
         chars = []
         history = HistoryCursor(entries or [])
         position = 0
@@ -198,6 +198,7 @@ class CardConsole:
             sys.stdout.flush()
             previous_width = len(visible)
 
+        next_poll = 0.0
         redraw()
         while True:
             changed = False
@@ -242,6 +243,12 @@ class CardConsole:
                         chars.insert(position, char)
                         position += 1
                     changed = changed or before != position
+            if poll_card and not chars and time.monotonic() >= next_poll:
+                card = poll_card()
+                if card is not None:
+                    print()
+                    return card
+                next_poll = time.monotonic() + 0.25
             event = self._event(epoch) if epoch is not None else None
             if isinstance(event, ScannedCard):
                 print(f"\nПрочитана карта: card_id {event.number}")
@@ -254,10 +261,10 @@ class CardConsole:
                 redraw()  # Максимум одна перерисовка за цикл, а не на каждый символ.
             time.sleep(0.02)
 
-    def _posix_read(self, prompt, epoch, entries=None):
+    def _posix_read(self, prompt, epoch, entries=None, *, poll_card=None):
         from .posix_console import PosixConsoleInput
         with PosixConsoleInput() as keyboard:
-            return self._windows_edit(prompt, epoch, keyboard, entries)
+            return self._windows_edit(prompt, epoch, keyboard, entries, poll_card=poll_card)
 
     def write_number(self, number, beep_t=10):
         if not self.enabled:
