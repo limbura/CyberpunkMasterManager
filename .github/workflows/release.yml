@@ -28,7 +28,6 @@ jobs:
         with:
           repository: limbura/CyberpunkIdPrinter
           ref: 1c07d6d8cd61e097a73b072e29a632ab67d86e32
-          token: ${{ secrets.PRINTER_REPO_READ_TOKEN }}
           persist-credentials: false
           path: CyberpunkIdPrinter
       - uses: actions/checkout@v4

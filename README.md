@@ -187,10 +187,7 @@ py -3.13 build_release.py --reader "../../CyberpunkPcRfidReader/wcopy_reader_pac
 собирает Windows x64 ZIP и после самопроверки публикует его в **Releases**
 репозитория менеджера. Тег должен совпадать с `v` + `VERSION` в отмеченном коммите.
 
-Перед первым релизом добавь в **CyberpunkMasterManager → Settings → Secrets and variables
-→ Actions → New repository secret** секрет `PRINTER_REPO_READ_TOKEN`.
-Значение — fine-grained personal access token для репозитория `limbura/CyberpunkIdPrinter`
-с правом **Contents: Read-only**. Для публикации используется встроенный токен Actions.
+Сборка и публикация используют встроенный токен GitHub Actions. Добавлять секреты вручную не требуется.
 
 Например, чтобы выпустить версию 2.11.0 из актуального `master`:
 
@@ -201,17 +198,14 @@ git tag v2.11.0
 git push origin v2.11.0
 ```
 
-Для отдельной сборки без публикации полный ZIP собирает workflow **Windows standalone manager** в приватном репозитории
+Для отдельной сборки без публикации полный ZIP собирает workflow **Windows standalone manager** в репозитории
 [CyberpunkIdPrinter](https://github.com/limbura/CyberpunkIdPrinter/actions/workflows/windows-manager.yml).
 **Actions → Windows standalone manager → Run workflow**, параметр `manager_ref` —
 ветка или коммит менеджера (по умолчанию `master`). Сборка запускается также при
 изменениях исходников библиотеки печати. После изменений только менеджера запусти
 её вручную. Считыватель и TiMini берутся по закреплённым коммитам.
 
-Workflow расположен в репозитории библиотеки печати, поскольку он приватный:
-стандартный токен Actions публичного менеджера не имеет доступа к его исходникам.
-Дополнительные секреты не нужны, видимость репозиториев не меняется. В репозитории
-менеджера workflow **Manager tests** по-прежнему проверяет изменения на Windows.
+В репозитории менеджера workflow **Manager tests** по-прежнему проверяет изменения на Windows.
 
 После успешного запуска скачай **Artifacts → cyberwall-master-manager-windows-x64**
 и извлеки находящийся внутри пользовательский ZIP. Артефакт хранится 30 дней;

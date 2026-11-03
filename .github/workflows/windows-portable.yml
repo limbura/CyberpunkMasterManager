@@ -38,4 +38,4 @@ jobs:
       - name: Full standalone ZIP location
         shell: pwsh
         run: |
-          'Full ZIP with printing is built in [CyberpunkIdPrinter / Windows standalone manager](https://github.com/limbura/CyberpunkIdPrinter/actions/workflows/windows-manager.yml). That private repository owns the printer source and can check out all dependencies without a cross-repository secret.' >> $env:GITHUB_STEP_SUMMARY
+          'Full ZIP with printing is built in [CyberpunkIdPrinter / Windows standalone manager](https://github.com/limbura/CyberpunkIdPrinter/actions/workflows/windows-manager.yml).' >> $env:GITHUB_STEP_SUMMARY
