@@ -69,6 +69,20 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(restored.current()['label_phase'], 'needed')
         self.assertEqual(restored.data['format'], 2)
 
+    def test_maintenance_while_waiting_for_card_and_label(self):
+        printer = Mock()
+        read = Mock(side_effect=['3', '4 2,5', card()])
+        ask = Mock(side_effect=['5 8', ':b', '5 8', '', ':b'])
+        b.process(self.db, self.j, self.reader, ask, printer=printer, read_card_or_command=read)
+        printer.calibrate.assert_called_once_with()
+        self.assertEqual(printer.move_paper.call_args_list, [
+            unittest.mock.call(2.5, reverse=False, removed=False),
+            unittest.mock.call(8, reverse=True, removed=True)])
+        self.print_label.assert_called_once()
+        self.reader.write_card_number.assert_called_once()
+        self.assertEqual(self.load().current()['card_id'], 1)
+        self.assertEqual(self.load().current()['label_phase'], 'sent')
+
     def test_placement_print_failure_resume_and_confirmation(self):
         self.print_label.side_effect = [False, True]
         def on_placement(prompt, *, poll_card):

@@ -316,6 +316,15 @@ def report(journal, only_skipped=False):
     print("\nПолный журнал: " + str(journal.path))
 
 
+def read_with_maintenance(prompt, read, printer, ask, **read_options):
+    print("3 — калибровка этикеток")
+    print("4 <мм> — подать вперёд; 5 <мм> — подать назад (только со снятой этикеткой!)")
+    while True:
+        value = read(prompt, **read_options)
+        if not isinstance(value, str) or not printer_menu.maintenance(printer, value, ask):
+            return value
+
+
 def confirm_label(journal, row, printer, ask, *, send_now, previous_removed=False):
     # Перед отправкой сохраняем неопределённый результат на случай обрыва связи.
     while True:
@@ -329,7 +338,8 @@ def confirm_label(journal, row, printer, ask, *, send_now, previous_removed=Fals
         can_confirm = row["label_phase"] in ("sending", "sent")
         prompt = ("Наклейка напечаталась и приклеена к этой карте? 1 — да; " if can_confirm
                   else "Нужна печать наклейки. ")
-        answer = ask(prompt + "2 — повторить печать; :b — сохранить и выйти: ").strip().lower()
+        answer = read_with_maintenance(prompt + "2 — повторить печать; :b — сохранить и выйти: ",
+                                       ask, printer, ask).strip().lower()
         if answer in (":b", ":q"):
             return False
         if answer == "1" and can_confirm:
@@ -367,7 +377,8 @@ def process(db, journal, reader, ask=input, beep_t=10, *, printer=None, read_car
         card = None
         if read_card_or_command and row and row["status"] not in READY | {"missing", "error", "writing"}:
             try:
-                value = read_card_or_command("Приложи карту или введи команду:", poll_card=poll_card)
+                value = read_with_maintenance("Приложи карту или введи команду:",
+                                              read_card_or_command, printer, ask, poll_card=poll_card)
             except reader.RFIDError as error:
                 row["status"] = "error"
                 journal.save()
@@ -378,7 +389,8 @@ def process(db, journal, reader, ask=input, beep_t=10, *, printer=None, read_car
             else:
                 card, command = value, ""
         else:
-            command = ask("Enter — проверить карту, или введи команду: ").strip()
+            command = read_with_maintenance("Enter — проверить карту, или введи команду: ",
+                                            ask, printer, ask).strip()
         lower = command.lower()
         message = ""
         if lower in (":b", ":q"):
