@@ -194,11 +194,7 @@ def header(journal, row, message=""):
              "Статус: " + (TITLES[row["status"]] if row else "Конец списка"),
              f"Записано: {counts['written']} | Уже соответствовало: {counts['already']} | "
              f"Пропущено: {counts['skipped']} | Проблемы: {counts['error'] + counts['writing'] + counts['missing']}",
-             safe(message), "",
-             ":skip — пропустить   :card N — к card_id   :id N — к ID",
-             ":skipped — пропущенные   :report — итоги   :next — дальше",
-             ":r — разрешить повтор   :b — сохранить и выйти", "",
-             "Приложи карту для записи."]
+             safe(message)]
     for line in lines:
         print(line[:width])  # Каждое поле занимает ровно одну строку.
 
@@ -316,11 +312,35 @@ def report(journal, only_skipped=False):
     print("\nПолный журнал: " + str(journal.path))
 
 
-def read_with_maintenance(prompt, read, printer, ask, **read_options):
-    print("3 — калибровка этикеток")
-    print("4 <мм> — подать вперёд; 5 <мм> — подать назад (только со снятой этикеткой!)")
+PRINTER_ACTIONS = (
+    "3 — калибровка этикеток",
+    "4 <мм> — подать бумагу вперёд",
+    "5 <мм> — подать бумагу назад (только со снятой этикеткой!)",
+)
+
+
+def card_actions(row, auto_scan):
+    actions = []
+    if row and row["status"] not in READY | {"missing"}:
+        if auto_scan:
+            actions.append("Приложи карту для автоматической записи")
+        actions.append("Enter — проверить карту")
+    actions.extend(PRINTER_ACTIONS)
+    if row:
+        if row["status"] in READY:
+            actions.append(":r — разрешить повторную запись")
+        else:
+            actions.append(":skip — пропустить аккаунт")
+        actions.append(":next — перейти дальше")
+    actions.extend((":card N — перейти к card_id", ":id N — перейти к ID",
+                    ":skipped — показать пропущенные", ":report — показать итоги"))
+    return actions
+
+
+def read_with_maintenance(actions, read, printer, ask, **read_options):
     while True:
-        value = read(prompt, **read_options)
+        print("\nДоступные действия", *actions, ":b, :q — сохранить и выйти", sep="\n")
+        value = read("Действие: ", **read_options)
         if not isinstance(value, str) or not printer_menu.maintenance(printer, value, ask):
             return value
 
@@ -336,10 +356,9 @@ def confirm_label(journal, row, printer, ask, *, send_now, previous_removed=Fals
             row["label_phase"] = "sent" if sent else "needed"
             journal.save()
         can_confirm = row["label_phase"] in ("sending", "sent")
-        prompt = ("Наклейка напечаталась и приклеена к этой карте? 1 — да; " if can_confirm
-                  else "Нужна печать наклейки. ")
-        answer = read_with_maintenance(prompt + "2 — повторить печать; :b — сохранить и выйти: ",
-                                       ask, printer, ask).strip().lower()
+        actions = ["1 — подтвердить, что наклейка напечаталась и приклеена"] if can_confirm else []
+        actions.extend(("2 — повторить печать", *PRINTER_ACTIONS))
+        answer = read_with_maintenance(actions, ask, printer, ask).strip().lower()
         if answer in (":b", ":q"):
             return False
         if answer == "1" and can_confirm:
@@ -377,7 +396,7 @@ def process(db, journal, reader, ask=input, beep_t=10, *, printer=None, read_car
         card = None
         if read_card_or_command and row and row["status"] not in READY | {"missing", "error", "writing"}:
             try:
-                value = read_with_maintenance("Приложи карту или введи команду:",
+                value = read_with_maintenance(card_actions(row, auto_scan=True),
                                               read_card_or_command, printer, ask, poll_card=poll_card)
             except reader.RFIDError as error:
                 row["status"] = "error"
@@ -389,7 +408,7 @@ def process(db, journal, reader, ask=input, beep_t=10, *, printer=None, read_car
             else:
                 card, command = value, ""
         else:
-            command = read_with_maintenance("Enter — проверить карту, или введи команду: ",
+            command = read_with_maintenance(card_actions(row, auto_scan=False),
                                             ask, printer, ask).strip()
         lower = command.lower()
         message = ""
@@ -397,7 +416,7 @@ def process(db, journal, reader, ask=input, beep_t=10, *, printer=None, read_car
             return
         if lower in (":report", ":skipped"):
             report(journal, lower == ":skipped")
-            command = ask("card_id для перехода [Enter — назад]: ").strip()
+            command = ask("card_id — перейти к аккаунту\nEnter — назад\nДействие: ").strip()
             if not command:
                 continue
             lower = ":card " + command

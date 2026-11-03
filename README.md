@@ -13,7 +13,7 @@
 Библиотека **wcopy_reader** не входит в исходную папку этой версии; сборщик встраивает её в готовый EXE.
 Готовый Windows ZIP содержит Python и зависимости и запускается без их установки и без интернета.
 
-Текущая версия программы — **2.11.0**. Номер версии задаётся в
+Текущая версия программы — **2.11.1**. Номер версии задаётся в
 [`cyberwall_master_manager/cyberwall_master_manager.py`](cyberwall_master_manager/cyberwall_master_manager.py),
 в переменной `VERSION`. Имя папки программы от версии не зависит.
 При выпуске новой версии обнови также номер в этом README; имя ZIP сборщик формирует из `VERSION`.
@@ -183,19 +183,19 @@ py -3.13 build_release.py --reader "../../CyberpunkPcRfidReader/wcopy_reader_pac
 
 ### Сборка на GitHub
 
-При пуше тега вида `v2.11.0` workflow **Release Windows ZIP** запускает тесты,
+При пуше тега вида `v2.11.1` workflow **Release Windows ZIP** запускает тесты,
 собирает Windows x64 ZIP и после самопроверки публикует его в **Releases**
 репозитория менеджера. Тег должен совпадать с `v` + `VERSION` в отмеченном коммите.
 
 Сборка и публикация используют встроенный токен GitHub Actions. Добавлять секреты вручную не требуется.
 
-Например, чтобы выпустить версию 2.11.0 из актуального `master`:
+Например, чтобы выпустить версию 2.11.1 из актуального `master`:
 
 ```bash
 git switch master
 git pull --ff-only
-git tag v2.11.0
-git push origin v2.11.0
+git tag v2.11.1
+git push origin v2.11.1
 ```
 
 Для отдельной сборки без публикации полный ZIP собирает workflow **Windows standalone manager** в репозитории
