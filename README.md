@@ -183,7 +183,25 @@ py -3.13 build_release.py --reader "../../CyberpunkPcRfidReader/wcopy_reader_pac
 
 ### Сборка на GitHub
 
-Полный ZIP собирает workflow **Windows standalone manager** в приватном репозитории
+При пуше тега вида `v2.11.0` workflow **Release Windows ZIP** запускает тесты,
+собирает Windows x64 ZIP и после самопроверки публикует его в **Releases**
+репозитория менеджера. Тег должен совпадать с `v` + `VERSION` в отмеченном коммите.
+
+Перед первым релизом добавь в **CyberpunkMasterManager → Settings → Secrets and variables
+→ Actions → New repository secret** секрет `PRINTER_REPO_READ_TOKEN`.
+Значение — fine-grained personal access token для репозитория `limbura/CyberpunkIdPrinter`
+с правом **Contents: Read-only**. Для публикации используется встроенный токен Actions.
+
+Например, чтобы выпустить версию 2.11.0 из актуального `master`:
+
+```bash
+git switch master
+git pull --ff-only
+git tag v2.11.0
+git push origin v2.11.0
+```
+
+Для отдельной сборки без публикации полный ZIP собирает workflow **Windows standalone manager** в приватном репозитории
 [CyberpunkIdPrinter](https://github.com/limbura/CyberpunkIdPrinter/actions/workflows/windows-manager.yml).
 **Actions → Windows standalone manager → Run workflow**, параметр `manager_ref` —
 ветка или коммит менеджера (по умолчанию `master`). Сборка запускается также при

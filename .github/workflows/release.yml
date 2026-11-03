@@ -1,0 +1,76 @@
+name: Release Windows ZIP
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: CyberpunkMasterManager
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Check release tag against application version
+        working-directory: CyberpunkMasterManager/cyberwall_master_manager
+        run: |
+          python -c "import os, sys; from build_release import APP_DIR, read_version; tag = 'v' + read_version(APP_DIR / 'cyberwall_master_manager.py', 'VERSION'); sys.exit(0 if tag == os.environ['GITHUB_REF_NAME'] else 'Expected tag ' + tag)"
+      - uses: actions/checkout@v4
+        with:
+          repository: limbura/CyberpunkIdPrinter
+          ref: 1c07d6d8cd61e097a73b072e29a632ab67d86e32
+          token: ${{ secrets.PRINTER_REPO_READ_TOKEN }}
+          persist-credentials: false
+          path: CyberpunkIdPrinter
+      - uses: actions/checkout@v4
+        with:
+          repository: limbura/CyberpunkPcRfidReader
+          ref: d51466c2ac952eac8307366b3059fa0e7bb12282
+          persist-credentials: false
+          path: CyberpunkPcRfidReader
+      - uses: actions/checkout@v4
+        with:
+          repository: Dejniel/TiMini-Print
+          ref: 679fc0650e61c7ab28b44542b9b9ba000e45aa78
+          persist-credentials: false
+          path: TiMini-Print
+      - name: Test manager
+        working-directory: CyberpunkMasterManager/cyberwall_master_manager
+        run: |
+          python -m pip install -r requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -v
+      - name: Build and self-test Windows ZIP
+        working-directory: CyberpunkMasterManager/cyberwall_master_manager
+        run: python build_release.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-zip
+          path: CyberpunkMasterManager/builds/cyberwall_master_manager_${{ github.ref_name }}_windows_x64.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-zip
+      - name: Publish ZIP on GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "cyberwall_master_manager_${GITHUB_REF_NAME}_windows_x64.zip" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
