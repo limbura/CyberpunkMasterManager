@@ -87,11 +87,18 @@ class CardConsole:
                         continue
                     epoch = self.epoch
                 card = None
+                started = time.monotonic()
+                _LOG.debug("Начат фоновый опрос карты (active=%s)", self.active)
                 try:
                     card = rfid.read_card(timeout_ms=READER_SETTINGS["timeout_ms"])
+                    _LOG.debug("Опрос успешен: duration_ms=%.1f uid=%s card_id=%s presentation_id=%s is_new=%s",
+                               (time.monotonic() - started) * 1000,
+                               getattr(card, "uid", b"").hex(" "), card.number,
+                               card.presentation_id, card.is_new)
                     consecutive_timeouts = 0
                     last_error = None
                 except rfid.NoCardError:
+                    _LOG.debug("Карта отсутствует: duration_ms=%.1f", (time.monotonic() - started) * 1000)
                     consecutive_timeouts = 0
                     last_error = None
                 except rfid.RFIDError as error:
@@ -101,9 +108,9 @@ class CardConsole:
                         consecutive_timeouts += 1
                     else:
                         consecutive_timeouts = 0
-                    _LOG.debug("Опрос считывателя: code=%s stage=%s status=%r; "
-                               "тайм-аутов подряд=%d: %s", error.code, error.stage,
-                               error.status, consecutive_timeouts, error)
+                    _LOG.debug("Опрос считывателя: duration_ms=%.1f code=%s stage=%s status=%r; "
+                               "тайм-аутов подряд=%d: %s", (time.monotonic() - started) * 1000,
+                               error.code, error.stage, error.status, consecutive_timeouts, error)
                     if consecutive_timeouts != 1:
                         signature = (error.code, error.stage, error.status)
                         if signature != last_error:
@@ -116,6 +123,7 @@ class CardConsole:
                         if self.active and epoch == self.epoch:
                             last_selected_presentation = card.presentation_id
                             self.events.put((epoch, ScannedCard(card.number)))
+                            _LOG.debug("card_id=%s передан в очередь Master Manager", card.number)
             self.wakeup.wait(delay)
             self.wakeup.clear()
             with self.condition:
