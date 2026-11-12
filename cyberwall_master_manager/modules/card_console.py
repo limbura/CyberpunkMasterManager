@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from contextlib import contextmanager
+import logging
 import os
 import queue
 import shutil
@@ -12,6 +13,8 @@ import time
 
 from .settings import SETTINGS, app_path
 from .input_history import HistoryCursor
+
+_LOG = logging.getLogger(__name__)
 
 READER_SETTINGS = SETTINGS["reader"]
 READER_IMPORT_ERROR = None
@@ -71,6 +74,7 @@ class CardConsole:
     def _worker(self):
         last_selected_presentation = None
         last_error = None
+        consecutive_timeouts = 0
         while True:
             with self.condition:
                 self.condition.wait_for(lambda: not self.write_in_progress or self.stopping)
@@ -85,15 +89,28 @@ class CardConsole:
                 card = None
                 try:
                     card = rfid.read_card(timeout_ms=READER_SETTINGS["timeout_ms"])
+                    consecutive_timeouts = 0
                     last_error = None
                 except rfid.NoCardError:
+                    consecutive_timeouts = 0
                     last_error = None
                 except rfid.RFIDError as error:
-                    signature = (error.code, error.stage, error.status)
-                    if signature != last_error:
-                        self._send(epoch, f"Считыватель: {error}. Можно продолжать с клавиатуры.")
-                    last_error = signature
-                    delay = READER_SETTINGS["error_retry_interval"]
+                    # Only background read timeouts get a quiet confirmation poll.
+                    # Never reinterpret a timeout as NoCard, or retry a write here.
+                    if isinstance(error, rfid.ReaderTimeoutError):
+                        consecutive_timeouts += 1
+                    else:
+                        consecutive_timeouts = 0
+                    _LOG.debug("Опрос считывателя: code=%s stage=%s status=%r; "
+                               "тайм-аутов подряд=%d: %s", error.code, error.stage,
+                               error.status, consecutive_timeouts, error)
+                    if consecutive_timeouts != 1:
+                        signature = (error.code, error.stage, error.status)
+                        if signature != last_error:
+                            self._send(epoch, f"Считыватель: {error}. Можно продолжать с клавиатуры.")
+                        last_error = signature
+                        delay = READER_SETTINGS["error_retry_interval"]
+                    # First timeout: ordinary poll_interval, not the long error delay.
                 if card is not None and card.presentation_id != last_selected_presentation:
                     with self.condition:
                         if self.active and epoch == self.epoch:
