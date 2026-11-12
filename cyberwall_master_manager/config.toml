@@ -22,6 +22,8 @@ library_path = "../../CyberpunkPcRfidReader/wcopy_reader_package"
 timeout_ms = 750
 poll_interval = 0.25
 error_retry_interval = 1.5
+# DEBUG-лог опросов и USB-пакетов рядом с EXE, с ротацией по 5 МБ.
+debug_log = true
 # Индикацией управляет библиотека wcopy_reader 1.7.0+.
 
 [state]
