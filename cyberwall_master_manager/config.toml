@@ -20,8 +20,8 @@ persistent_host_control = true
 # Относительный путь считается от папки программы, не от текущей папки консоли.
 library_path = "../../CyberpunkPcRfidReader/wcopy_reader_package"
 timeout_ms = 750
-poll_interval = 0.25
-error_retry_interval = 1.5
+poll_interval = 0.1
+error_retry_interval = 1.0
 # DEBUG-лог опросов и USB-пакетов рядом с EXE, с ротацией по 5 МБ.
 debug_log = false
 # Индикацией управляет библиотека wcopy_reader 1.7.0+.
