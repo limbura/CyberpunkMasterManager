@@ -6,9 +6,21 @@ import unittest
 
 from test_cyberwall_master_manager import console
 from modules.reader_debug import configure_reader_debug_logging, close_reader_debug_logging
+from modules.settings import APP_DIR, load_settings
 
 
 class ReaderDebugLoggingTests(unittest.TestCase):
+    def test_default_and_legacy_config_disable_logging(self):
+        source = (APP_DIR / "config.toml").read_text(encoding="utf-8")
+        self.assertFalse(load_settings()["reader"]["debug_log"])
+        with tempfile.TemporaryDirectory() as temp:
+            legacy = Path(temp) / "config.toml"
+            legacy.write_text(
+                "\n".join(line for line in source.splitlines()
+                          if not line.strip().startswith("debug_log =")),
+                encoding="utf-8")
+            self.assertFalse(load_settings(legacy)["reader"]["debug_log"])
+
     def tearDown(self):
         close_reader_debug_logging()
 
