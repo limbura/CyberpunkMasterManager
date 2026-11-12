@@ -385,6 +385,14 @@ class ManagerTests(unittest.TestCase):
         self.assertNotIn('Карта могла измениться', text)
         self.assertNotIn('а не ID', text)
 
+    def test_close_releases_reader_after_stopping_polling(self):
+        device = console.CardConsole(enabled=False)
+        device.enabled = True
+        with patch.object(console.rfid, 'close_readers', return_value=True) as release:
+            device.close()
+        self.assertTrue(device.stopping)
+        release.assert_called_once_with()
+
     def test_monitor_reads_in_account_menu_without_manual_feedback(self):
         import threading
         polled = threading.Event()

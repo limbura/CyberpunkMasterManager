@@ -15,12 +15,14 @@ page_size = 15
 
 [reader]
 enabled = true
+# Cyb: сохранять управление с ПК между опросами. false — прежний режим.
+persistent_host_control = true
 # Относительный путь считается от папки программы, не от текущей папки консоли.
 library_path = "../../CyberpunkPcRfidReader/wcopy_reader_package"
 timeout_ms = 750
 poll_interval = 0.25
 error_retry_interval = 1.5
-# Индикацией управляет библиотека wcopy_reader 1.6.0+.
+# Индикацией управляет библиотека wcopy_reader 1.7.0+.
 
 [state]
 pending_id_file = "pending_id_change.json"

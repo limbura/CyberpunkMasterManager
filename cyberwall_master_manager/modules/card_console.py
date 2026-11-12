@@ -29,8 +29,8 @@ try:
         rfid = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = rfid
         spec.loader.exec_module(rfid)
-    if not hasattr(rfid, "is_card_removed"):
-        raise ImportError("Для автоматической индикации нужна wcopy_reader 1.6.0 или новее.")
+    if not all(hasattr(rfid, name) for name in ("is_card_removed", "close_readers", "set_persistent_host_control")):
+        raise ImportError("Для автоматической индикации нужна wcopy_reader 1.7.0 или новее.")
 except (ImportError, OSError) as error:
     READER_IMPORT_ERROR = str(error)
     rfid = None
@@ -59,6 +59,7 @@ class CardConsole:
         self.stopping = False
         self.thread = None
         if self.enabled:
+            rfid.set_persistent_host_control(READER_SETTINGS["persistent_host_control"])
             self.thread = threading.Thread(target=self._worker, daemon=True)
             self.thread.start()
 
@@ -275,7 +276,7 @@ class CardConsole:
             raise RuntimeError("Пакетная запись требует включённой библиотеки считывателя.")
         import inspect
         if not {"expected_uid", "expected_block"} <= set(inspect.signature(rfid.write_card_number).parameters):
-            raise RuntimeError("Для пакетной записи нужна wcopy_reader 1.6.0 или новее. Обнови библиотеку.")
+            raise RuntimeError("Для пакетной записи нужна wcopy_reader 1.7.0 или новее. Обнови библиотеку.")
         self._stop_scan()
         with self.condition:
             self.write_in_progress = True
@@ -296,3 +297,6 @@ class CardConsole:
         self.wakeup.set()
         if self.thread is not None:
             self.thread.join(timeout=1)
+        if self.enabled:
+            # Serialized by the library: waits for in-flight I/O before release.
+            rfid.close_readers()
