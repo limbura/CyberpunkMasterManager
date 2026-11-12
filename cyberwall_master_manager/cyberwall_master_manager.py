@@ -18,6 +18,7 @@ from modules.settings import SETTINGS, APP_DIR, app_path
 from modules.thermal_printer import ThermalPrinterService
 from modules import printer_menu
 from modules.card_console import CardConsole, ScannedCard, CardNotPresentError, READER_IMPORT_ERROR
+from modules.reader_debug import configure_reader_debug_logging, close_reader_debug_logging
 from modules.account_fields import validate_name, NAME_RULES, LABELS, column_hint, parse_column, editable_columns, validate_column
 from modules import batch_cards
 from modules.connection_store import ConnectionStore
@@ -1111,6 +1112,11 @@ def main():
     connection = None
     try:
         print(f"CYBERWALL - менеджмент для мастеров (v{VERSION})")
+        if READER_ENABLED:
+            try:
+                configure_reader_debug_logging(SETTINGS["reader"]["debug_log"])
+            except OSError as error:
+                print(f"Не удалось создать reader_debug.log: {error}. Работа продолжится без файла журнала.")
         CONSOLE = CardConsole(READER_ENABLED)
         THERMAL_PRINTER = ThermalPrinterService(SETTINGS['printer'], APP_DIR / 'config.toml')
         THERMAL_PRINTER.start()
@@ -1177,6 +1183,7 @@ def main():
             CONSOLE = None
         if connection is not None and connection.open:
             connection.close()
+        close_reader_debug_logging()
 
 
 if __name__ == "__main__":
