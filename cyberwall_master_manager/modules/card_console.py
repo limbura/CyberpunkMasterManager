@@ -94,7 +94,7 @@ class CardConsole:
                     _LOG.debug("Опрос успешен: duration_ms=%.1f uid=%s card_id=%s presentation_id=%s is_new=%s",
                                (time.monotonic() - started) * 1000,
                                getattr(card, "uid", b"").hex(" "), card.number,
-                               card.presentation_id, card.is_new)
+                               getattr(card, "presentation_id", None), getattr(card, "is_new", None))
                     consecutive_timeouts = 0
                     last_error = None
                 except rfid.NoCardError:
