@@ -18,7 +18,7 @@ def load_settings(path=APP_DIR / "config.toml"):
     with Path(path).open("rb") as stream:
         config = tomllib.load(stream)
     config.setdefault("reader", {}).setdefault("persistent_host_control", True)
-    config["reader"].setdefault("debug_log", True)
+    config["reader"].setdefault("debug_log", False)
     config.setdefault("state", {}).setdefault("batch_cards_file", "batch_cards.json")
     for section, keys in {
         "database": ("host", "port", "user", "name", "connect_timeout", "read_timeout", "write_timeout"),
