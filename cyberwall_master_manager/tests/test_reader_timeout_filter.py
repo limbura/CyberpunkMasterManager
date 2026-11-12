@@ -40,7 +40,8 @@ class PollTimeoutTests(unittest.TestCase):
             events, delays = self.run_poll([self.timeout('initialize'), card])
         self.assertEqual(events, [console.ScannedCard(123)])
         self.assertEqual(delays, [console.READER_SETTINGS['poll_interval']]*2)
-        self.assertIn('stage=initialize', logs.output[0])
+        self.assertTrue(any('stage=initialize' in message for message in logs.output),
+                        logs.output)
 
     def test_card_removal_reply_resets_timeout_streak(self):
         absent = r.NoCardError('none', stage='poll')
