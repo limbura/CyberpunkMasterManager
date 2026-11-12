@@ -287,6 +287,8 @@ def build(reader=None, output=None, *, printer=None, timini=None, no_install=Fal
     printer_version = read_version(printer / "src/cyberwall_id_printer/__init__.py", "__version__")
     version = read_version(APP_DIR / "cyberwall_master_manager.py", "VERSION")
     reader_version = read_version(reader / "wcopy_reader.py", "__version__")
+    if tuple(int(x) for x in reader_version.split(".")[:3]) < (1, 6, 0):
+        raise ValueError("Для Master Manager 2.12 требуется wcopy_reader 1.6.0 или новее.")
     output = Path(output or APP_DIR.parent / "builds" / f"{APP_NAME}_v{version}_windows_x64.zip").resolve()
     if output.exists():
         raise ValueError(f"Архив уже существует: {output}. Укажи новое имя.")

@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: limbura/CyberpunkPcRfidReader
-          ref: d51466c2ac952eac8307366b3059fa0e7bb12282
+          ref: 2471f6c1871c6935bcad056669a41fb1647e7b21
           persist-credentials: false
           path: CyberpunkPcRfidReader
       - uses: actions/checkout@v4

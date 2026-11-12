@@ -155,7 +155,9 @@ class BatchTests(unittest.TestCase):
 
     def test_beep_failure_keeps_success(self):
         self.reader.beep.side_effect = r.FeedbackError('failed', stage='feedback')
-        self.assertIn('писк не сработал', self.attempt())
+        self.assertEqual('Карта проверена.', self.attempt())
+        self.reader.beep.assert_not_called()
+        self.reader.set_led.assert_not_called()
         self.assertEqual(self.load().current()['status'], 'written')
 
     def test_skip_jump_gap_and_restore_cursor(self):
@@ -186,6 +188,7 @@ class BatchTests(unittest.TestCase):
         self.assertFalse(self.load().data['uids'])
 
     def test_usb_error_does_not_count_as_removal(self):
+        self.reader.is_card_removed.return_value = False
         self.ready()
         self.reader.read_card.side_effect = [r.NoCardError('no', stage='poll'), r.USBError('lost', stage='read'), r.NoCardError('no', stage='poll'), KeyboardInterrupt()]
         with patch.object(b.time, 'sleep'), self.assertRaises(KeyboardInterrupt):

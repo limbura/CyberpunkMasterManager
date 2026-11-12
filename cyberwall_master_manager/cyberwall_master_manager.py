@@ -37,9 +37,8 @@ DEFAULT_USER = SETTINGS["database"]["user"]
 DATABASE_NAME = SETTINGS["database"]["name"]
 PAGE_SIZE = SETTINGS["interface"]["page_size"]
 READER_ENABLED = SETTINGS["reader"]["enabled"]
-WRITE_BEEP_T = SETTINGS["reader"]["write_beep_t"]
 PENDING_ID_PATH = app_path(SETTINGS["state"]["pending_id_file"])
-VERSION = "2.11.1"
+VERSION = "2.12.0"
 BATCH_PATH = app_path(SETTINGS["state"]["batch_cards_file"])
 CONSOLE = None
 THERMAL_PRINTER = None
@@ -528,7 +527,7 @@ def general_menu(db):
                 if CONSOLE is None:
                     raise RuntimeError("Считыватель не инициализирован.")
                 batch_cards.run(db, CONSOLE, BATCH_PATH, database_scope(db),
-                                printer=THERMAL_PRINTER, beep_t=WRITE_BEEP_T, ask=CONSOLE.read)
+                                printer=THERMAL_PRINTER, ask=CONSOLE.read)
             elif choice == "3":
                 printer_menu.templates(THERMAL_PRINTER, read_input)
             elif choice == "4":
@@ -891,7 +890,7 @@ def write_account_card(db, selected):
     try:
         if CONSOLE is None:
             raise RuntimeError("Считыватель не инициализирован.")
-        number, warning = CONSOLE.write_number(selected.card_id, WRITE_BEEP_T)
+        number, warning = CONSOLE.write_number(selected.card_id)
     except CardNotPresentError:
         print("Карта не обнаружена. Запись не выполнялась. Приложи карту и снова выбери пункт 11.")
         return
