@@ -18,6 +18,7 @@ def load_settings(path=APP_DIR / "config.toml"):
     with Path(path).open("rb") as stream:
         config = tomllib.load(stream)
     config.setdefault("reader", {}).setdefault("persistent_host_control", True)
+    config["reader"].setdefault("debug_log", True)
     config.setdefault("state", {}).setdefault("batch_cards_file", "batch_cards.json")
     for section, keys in {
         "database": ("host", "port", "user", "name", "connect_timeout", "read_timeout", "write_timeout"),
@@ -43,6 +44,8 @@ def load_settings(path=APP_DIR / "config.toml"):
             raise ValueError(f"В config.toml [reader] {key}: число 0.01…60 секунд.")
     if type(config["reader"]["persistent_host_control"]) is not bool:
         raise ValueError("В config.toml [reader] persistent_host_control: true или false.")
+    if type(config["reader"]["debug_log"]) is not bool:
+        raise ValueError("В config.toml [reader] debug_log: true или false.")
     if type(config["reader"]["enabled"]) is not bool:
         raise ValueError("В config.toml [reader] enabled: true или false.")
     for section, keys in {"database": ("host", "user", "name"),
