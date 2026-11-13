@@ -1131,6 +1131,9 @@ def main():
         THERMAL_PRINTER = ThermalPrinterService(SETTINGS['printer'], APP_DIR / 'config.toml')
         THERMAL_PRINTER.start()
         print_library_versions()
+        if CONSOLE.startup_reader_warning:
+            print(f"ВНИМАНИЕ: {clean(CONSOLE.startup_reader_warning)}")
+            print("Доступ к считывателю будет проверяться повторно автоматически.")
         store = ConnectionStore()
         automatic, defaults = True, None
         while True:
