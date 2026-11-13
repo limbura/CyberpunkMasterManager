@@ -241,7 +241,7 @@ class ManagerTests(unittest.TestCase):
         device.write_number.return_value = (ACCOUNT.card_id, None)
         with patch.object(app, 'CONSOLE', device), patch.object(app, 'read_input', return_value='да'):
             app.write_account_card(db, ACCOUNT)
-        device.write_number.assert_called_once_with(ACCOUNT.card_id, 10)
+        device.write_number.assert_called_once_with(ACCOUNT.card_id)
     def test_write_cancel_never_touches_reader(self):
         db = self.fake_db()
         device = Mock()
@@ -268,7 +268,7 @@ class ManagerTests(unittest.TestCase):
         with patch.object(console.rfid, 'write_card_number', return_value=ACCOUNT.card_id) as write, patch.object(console.rfid, 'beep', side_effect=console.rfid.USBError('beep failed', stage='feedback')):
             result, warning = device.write_number(ACCOUNT.card_id)
         self.assertEqual(result, ACCOUNT.card_id)
-        self.assertIn('beep failed', warning)
+        self.assertIsNone(warning)
         write.assert_called_once_with(ACCOUNT.card_id)
     def test_stale_card_event_cannot_leak_into_next_prompt(self):
         device = console.CardConsole(enabled=False)
@@ -283,17 +283,17 @@ class ManagerTests(unittest.TestCase):
         device.close()
 
     def test_hotplug_held_card_and_remove_reapply(self):
-        card = types.SimpleNamespace(uid=b'1234', number=ACCOUNT.card_id)
+        card = types.SimpleNamespace(uid=b'1234', number=ACCOUNT.card_id, presentation_id=1)
         sequence = queue.Queue()
         for value in [console.rfid.ReaderNotFoundError('not connected', stage='enumerate'),
                       card, card, console.rfid.NoCardError('empty', stage='poll'),
-                      console.rfid.NoCardError('empty', stage='poll'), card]:
+                      console.rfid.NoCardError('empty', stage='poll'), types.SimpleNamespace(uid=b'1234', number=ACCOUNT.card_id, presentation_id=2)]:
             sequence.put(value)
         def read(**kwargs):
             try:
                 value = sequence.get_nowait()
             except queue.Empty:
-                value = card
+                value = types.SimpleNamespace(uid=b'1234', number=ACCOUNT.card_id, presentation_id=2)
             if isinstance(value, Exception):
                 raise value
             return value
@@ -419,57 +419,44 @@ class ManagerTests(unittest.TestCase):
         self.assertNotIn('Карта могла измениться', text)
         self.assertNotIn('а не ID', text)
 
-    def test_monitor_keeps_feedback_in_account_menu(self):
+    def test_close_releases_reader_after_stopping_polling(self):
+        device = console.CardConsole(enabled=False)
+        device.enabled = True
+        with patch.object(console.rfid, 'close_readers', return_value=True) as release:
+            device.close()
+        self.assertTrue(device.stopping)
+        release.assert_called_once_with()
+
+    def test_monitor_reads_in_account_menu_without_manual_feedback(self):
         import threading
-        feedback = threading.Event()
-        card = types.SimpleNamespace(uid=b'1234', number=ACCOUNT.card_id)
-        with patch.object(console.rfid, 'read_card', return_value=card), patch.object(console.rfid, 'set_led', side_effect=lambda *a, **k: feedback.set()):
+        polled = threading.Event()
+        card = types.SimpleNamespace(number=ACCOUNT.card_id, presentation_id=1)
+        def read(**kwargs):
+            polled.set()
+            return card
+        with patch.object(console.rfid, 'read_card', side_effect=read), \
+             patch.object(console.rfid, 'set_led') as led, patch.object(console.rfid, 'beep') as beep:
             device = console.CardConsole()
             try:
-                self.assertTrue(feedback.wait(1))
+                self.assertTrue(polled.wait(1))
                 self.assertFalse(device.active)
                 self.assertTrue(device.events.empty())
             finally:
                 device.close()
+            led.assert_not_called()
+            beep.assert_not_called()
 
-    def test_failed_write_immediately_rearms_feedback_without_search(self):
-        import threading
-        recovered = threading.Event()
+    def test_failed_write_immediately_rearms_polling_without_search(self):
         device = console.CardConsole(enabled=False)
         device.enabled = True
-        device.feedback_retry_at = float('inf')
-        card = types.SimpleNamespace(uid=b'1234', number=ACCOUNT.card_id)
-        with patch.object(console.rfid, 'write_card_number', side_effect=console.rfid.NoCardError('empty', stage='poll')) as write, patch.object(console.rfid, 'read_card', return_value=card), patch.object(console.rfid, 'set_led', side_effect=lambda *a, **k: recovered.set()):
-            try:
-                with self.assertRaises(console.CardNotPresentError):
-                    device.write_number(ACCOUNT.card_id)
-                self.assertFalse(device.write_in_progress)
-                self.assertEqual(device.feedback_retry_at, 0)
-                self.assertTrue(device.wakeup.is_set())
-                self.assertFalse(device.active)
-                device.thread = threading.Thread(target=device._worker, daemon=True)
-                device.thread.start()
-                self.assertTrue(recovered.wait(1))
-                write.assert_called_once()
-            finally:
-                device.close()
-
-    def test_feedback_recovers_after_transient_failure(self):
-        import threading
-        recovered = threading.Event()
-        calls = []
-        card = types.SimpleNamespace(uid=b'1234', number=ACCOUNT.card_id)
-        def led(*args, **kwargs):
-            calls.append(args)
-            if len(calls) == 1:
-                raise console.rfid.USBError('temporary', stage='feedback')
-            recovered.set()
-        with patch.object(console.rfid, 'read_card', return_value=card), patch.object(console.rfid, 'set_led', side_effect=led):
-            device = console.CardConsole()
-            try:
-                self.assertTrue(recovered.wait(2.5))
-            finally:
-                device.close()
+        with patch.object(console.rfid, 'write_card_number',
+                          side_effect=console.rfid.NoCardError('empty', stage='poll')):
+            with self.assertRaises(console.CardNotPresentError):
+                device.write_number(ACCOUNT.card_id)
+        self.assertFalse(device.write_in_progress)
+        self.assertTrue(device.wakeup.is_set())
+        self.assertFalse(device.active)
+        device.close()
 
 
 if __name__ == '__main__':

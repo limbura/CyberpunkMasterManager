@@ -200,31 +200,20 @@ def header(journal, row, message=""):
 
 
 def scan(reader):
-    present = False
-    try:
-        card = reader.read_card()
-        present = True
-        return card
-    finally:
-        try:
-            reader.set_led("green" if present else "red")
-        except reader.RFIDError:
-            pass  # Индикация не меняет результат чтения.
+    return reader.read_card()
 
 
 def wait_removed(reader, journal):
-    absent = 0
     print("\nУБЕРИ КАРТУ. Следующий аккаунт появится после снятия. Ctrl+C — выйти.")
     last_error = None
-    while absent < 2:
+    while True:
         try:
             scan(reader)
-            absent = 0
         except reader.NoCardError:
-            absent += 1
+            if reader.is_card_removed():
+                break
             last_error = None
         except reader.RFIDError as error:
-            absent = 0  # Ошибка USB/авторизации НЕ является снятием карты.
             if str(error) != last_error:
                 print("Ожидаем считыватель: " + safe(error))
                 last_error = str(error)
@@ -294,12 +283,7 @@ def attempt(db, journal, row, reader, ask, beep_t, card=None):
             journal.save()
             raise
         journal.finish(row, status)
-    warning = ""
-    try:
-        reader.beep(t=beep_t)
-    except reader.RFIDError as error:
-        warning = " Проверка успешна, но писк не сработал: " + safe(error)
-    return "Карта проверена." + warning
+    return "Карта проверена."
 
 
 def report(journal, only_skipped=False):

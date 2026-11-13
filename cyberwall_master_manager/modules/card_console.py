@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from contextlib import contextmanager
+import logging
 import os
 import queue
 import shutil
@@ -12,6 +13,8 @@ import time
 
 from .settings import SETTINGS, app_path
 from .input_history import HistoryCursor
+
+_LOG = logging.getLogger(__name__)
 
 READER_SETTINGS = SETTINGS["reader"]
 READER_IMPORT_ERROR = None
@@ -29,6 +32,8 @@ try:
         rfid = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = rfid
         spec.loader.exec_module(rfid)
+    if not all(hasattr(rfid, name) for name in ("is_card_removed", "close_readers", "set_persistent_host_control")):
+        raise ImportError("Для автоматической индикации нужна wcopy_reader 1.7.0 или новее.")
 except (ImportError, OSError) as error:
     READER_IMPORT_ERROR = str(error)
     rfid = None
@@ -52,12 +57,12 @@ class CardConsole:
         self.io_lock = threading.Lock()
         self.active = False  # Разрешение выбирать аккаунты, НЕ разрешение опроса USB.
         self.write_in_progress = False
-        self.feedback_retry_at = 0.0
         self.wakeup = threading.Event()
         self.epoch = 0
         self.stopping = False
         self.thread = None
         if self.enabled:
+            rfid.set_persistent_host_control(READER_SETTINGS["persistent_host_control"])
             self.thread = threading.Thread(target=self._worker, daemon=True)
             self.thread.start()
 
@@ -67,10 +72,9 @@ class CardConsole:
                 self.events.put((epoch, value))
 
     def _worker(self):
-        last_selected_uid = None
-        absent = 0
+        last_selected_presentation = None
         last_error = None
-        feedback_error = None
+        consecutive_timeouts = 0
         while True:
             with self.condition:
                 self.condition.wait_for(lambda: not self.write_in_progress or self.stopping)
@@ -82,44 +86,44 @@ class CardConsole:
                     if self.write_in_progress or self.stopping:
                         continue
                     epoch = self.epoch
-                present = None
                 card = None
+                started = time.monotonic()
+                _LOG.debug("Начат фоновый опрос карты (active=%s)", self.active)
                 try:
                     card = rfid.read_card(timeout_ms=READER_SETTINGS["timeout_ms"])
-                    present = True
-                    absent = 0
+                    _LOG.debug("Опрос успешен: duration_ms=%.1f uid=%s card_id=%s presentation_id=%s is_new=%s",
+                               (time.monotonic() - started) * 1000,
+                               getattr(card, "uid", b"").hex(" "), card.number,
+                               getattr(card, "presentation_id", None), getattr(card, "is_new", None))
+                    consecutive_timeouts = 0
                     last_error = None
                 except rfid.NoCardError:
-                    absent += 1
-                    # Это происходит и в меню редактирования: снятие карты не теряется.
-                    if absent >= 2:
-                        last_selected_uid = None
-                    present = False
+                    _LOG.debug("Карта отсутствует: duration_ms=%.1f", (time.monotonic() - started) * 1000)
+                    consecutive_timeouts = 0
                     last_error = None
                 except rfid.RFIDError as error:
-                    absent = 0
-                    signature = (error.code, error.stage, error.status)
-                    if signature != last_error:
-                        self._send(epoch, f"Считыватель: {error}. Можно продолжать с клавиатуры.")
-                    last_error = signature
-                    delay = READER_SETTINGS["error_retry_interval"]
-                if present is not None and time.monotonic() >= self.feedback_retry_at:
-                    try:
-                        # Команды нужны для штатного цвета и писка прошивки.
-                        rfid.set_led("green" if present else "red", timeout_ms=READER_SETTINGS["timeout_ms"])
-                        feedback_error = None
-                        self.feedback_retry_at = 0.0
-                    except rfid.RFIDError as error:
+                    # Only background read timeouts get a quiet confirmation poll.
+                    # Never reinterpret a timeout as NoCard, or retry a write here.
+                    if isinstance(error, rfid.ReaderTimeoutError):
+                        consecutive_timeouts += 1
+                    else:
+                        consecutive_timeouts = 0
+                    _LOG.debug("Опрос считывателя: duration_ms=%.1f code=%s stage=%s status=%r; "
+                               "тайм-аутов подряд=%d: %s", (time.monotonic() - started) * 1000,
+                               error.code, error.stage, error.status, consecutive_timeouts, error)
+                    if consecutive_timeouts != 1:
                         signature = (error.code, error.stage, error.status)
-                        if signature != feedback_error:
-                            self._send(epoch, f"Сбой индикации: {error}. Восстановление будет повторено автоматически.")
-                        feedback_error = signature
-                        self.feedback_retry_at = time.monotonic() + READER_SETTINGS["feedback_retry_interval"]
-                if card is not None and card.uid != last_selected_uid:
+                        if signature != last_error:
+                            self._send(epoch, f"Считыватель: {error}. Можно продолжать с клавиатуры.")
+                        last_error = signature
+                        delay = READER_SETTINGS["error_retry_interval"]
+                    # First timeout: ordinary poll_interval, not the long error delay.
+                if card is not None and card.presentation_id != last_selected_presentation:
                     with self.condition:
                         if self.active and epoch == self.epoch:
-                            last_selected_uid = card.uid
+                            last_selected_presentation = card.presentation_id
                             self.events.put((epoch, ScannedCard(card.number)))
+                            _LOG.debug("card_id=%s передан в очередь Master Manager", card.number)
             self.wakeup.wait(delay)
             self.wakeup.clear()
             with self.condition:
@@ -267,6 +271,7 @@ class CardConsole:
             return self._windows_edit(prompt, epoch, keyboard, entries, poll_card=poll_card)
 
     def write_number(self, number, beep_t=10):
+        """Запись с автоматической индикацией библиотеки; старый beep_t игнорируется."""
         if not self.enabled:
             raise RuntimeError("Работа со считывателем отключена или отсутствует модуль wcopy_reader.")
         self._stop_scan()
@@ -280,17 +285,11 @@ class CardConsole:
                     result = rfid.write_card_number(number)
                 except rfid.NoCardError as error:
                     raise CardNotPresentError("Карта не обнаружена. Запись не выполнялась.") from error
-                warning = None
-                try:
-                    rfid.beep(t=beep_t)
-                except rfid.RFIDError as error:
-                    warning = str(error)
-                return result, warning
+                return result, None
         finally:
             # В том числе при NoCardError, сбое записи и Ctrl+C: сразу возвращаем
-            # опрос + LED, не ждём нового поиска, тайм-аута или перезапуска.
+            # опрос и автоматическую индикацию библиотеки, не ждём нового поиска, тайм-аута или перезапуска.
             with self.condition:
-                self.feedback_retry_at = 0.0
                 self.write_in_progress = False
                 self.condition.notify_all()
             self.wakeup.set()
@@ -302,7 +301,7 @@ class CardConsole:
             raise RuntimeError("Пакетная запись требует включённой библиотеки считывателя.")
         import inspect
         if not {"expected_uid", "expected_block"} <= set(inspect.signature(rfid.write_card_number).parameters):
-            raise RuntimeError("Для пакетной записи нужна wcopy_reader 1.4.4 или новее. Обнови библиотеку.")
+            raise RuntimeError("Для пакетной записи нужна wcopy_reader 1.7.0 или новее. Обнови библиотеку.")
         self._stop_scan()
         with self.condition:
             self.write_in_progress = True
@@ -311,7 +310,6 @@ class CardConsole:
                 yield rfid
         finally:
             with self.condition:
-                self.feedback_retry_at = 0.0
                 self.write_in_progress = False
                 self.condition.notify_all()
             self.wakeup.set()
@@ -324,3 +322,6 @@ class CardConsole:
         self.wakeup.set()
         if self.thread is not None:
             self.thread.join(timeout=1)
+        if self.enabled:
+            # Serialized by the library: waits for in-flight I/O before release.
+            rfid.close_readers()

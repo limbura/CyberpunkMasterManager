@@ -18,6 +18,7 @@ from modules.settings import SETTINGS, APP_DIR, app_path
 from modules.thermal_printer import ThermalPrinterService
 from modules import printer_menu
 from modules.card_console import CardConsole, ScannedCard, CardNotPresentError, READER_IMPORT_ERROR, rfid
+from modules.reader_debug import configure_reader_debug_logging, close_reader_debug_logging
 from modules.account_fields import validate_name, NAME_RULES, LABELS, column_hint, parse_column, editable_columns, validate_column
 from modules import batch_cards
 from modules.connection_store import ConnectionStore
@@ -37,9 +38,8 @@ DEFAULT_USER = SETTINGS["database"]["user"]
 DATABASE_NAME = SETTINGS["database"]["name"]
 PAGE_SIZE = SETTINGS["interface"]["page_size"]
 READER_ENABLED = SETTINGS["reader"]["enabled"]
-WRITE_BEEP_T = SETTINGS["reader"]["write_beep_t"]
 PENDING_ID_PATH = app_path(SETTINGS["state"]["pending_id_file"])
-VERSION = "2.11.1"
+VERSION = "2.12.3"
 BATCH_PATH = app_path(SETTINGS["state"]["batch_cards_file"])
 CONSOLE = None
 THERMAL_PRINTER = None
@@ -528,7 +528,7 @@ def general_menu(db):
                 if CONSOLE is None:
                     raise RuntimeError("Считыватель не инициализирован.")
                 batch_cards.run(db, CONSOLE, BATCH_PATH, database_scope(db),
-                                printer=THERMAL_PRINTER, beep_t=WRITE_BEEP_T, ask=CONSOLE.read)
+                                printer=THERMAL_PRINTER, ask=CONSOLE.read)
             elif choice == "3":
                 printer_menu.templates(THERMAL_PRINTER, read_input)
             elif choice == "4":
@@ -891,7 +891,7 @@ def write_account_card(db, selected):
     try:
         if CONSOLE is None:
             raise RuntimeError("Считыватель не инициализирован.")
-        number, warning = CONSOLE.write_number(selected.card_id, WRITE_BEEP_T)
+        number, warning = CONSOLE.write_number(selected.card_id)
     except CardNotPresentError:
         print("Карта не обнаружена. Запись не выполнялась. Приложи карту и снова выбери пункт 11.")
         return
@@ -1122,6 +1122,11 @@ def main():
     connection = None
     try:
         print(f"CYBERWALL - менеджмент для мастеров (v{VERSION})")
+        if READER_ENABLED:
+            try:
+                configure_reader_debug_logging(SETTINGS["reader"]["debug_log"])
+            except OSError as error:
+                print(f"Не удалось создать reader_debug.log: {error}. Работа продолжится без файла журнала.")
         CONSOLE = CardConsole(READER_ENABLED)
         THERMAL_PRINTER = ThermalPrinterService(SETTINGS['printer'], APP_DIR / 'config.toml')
         THERMAL_PRINTER.start()
@@ -1189,6 +1194,7 @@ def main():
             CONSOLE = None
         if connection is not None and connection.open:
             connection.close()
+        close_reader_debug_logging()
 
 
 if __name__ == "__main__":

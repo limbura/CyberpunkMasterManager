@@ -60,14 +60,14 @@ def self_test():
         raise RuntimeError("Настройки загружены не из папки EXE.")
     if rfid is None or READER_IMPORT_ERROR:
         raise RuntimeError(f"Библиотека считывателя не загрузилась: {READER_IMPORT_ERROR}")
-    for name in ("read_card", "write_card_number", "set_led", "beep"):
+    for name in ("read_card", "write_card_number", "is_card_removed", "close_readers", "set_led", "beep"):
         if not callable(getattr(rfid, name, None)):
             raise RuntimeError(f"В API считывателя отсутствует {name}.")
     # Проверяем загрузку нативного HID-модуля без открытия устройства.
     if not callable(hid.enumerate):
         raise RuntimeError("hidapi недоступна.")
     if not {"expected_uid", "expected_block"} <= set(inspect.signature(wcopy_reader.write_card_number).parameters):
-        raise RuntimeError("Пакетной записи требуется API wcopy_reader 1.4.4+.")
+        raise RuntimeError("Пакетной записи требуется API wcopy_reader 1.7.0+.")
     if not callable(batch_cards.run):
         raise RuntimeError("Модуль пакетной записи отсутствует в сборке.")
     if dpapi(dpapi(b"offline-profile-check"), decrypt=True) != b"offline-profile-check":

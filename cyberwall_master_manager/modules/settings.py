@@ -17,12 +17,14 @@ APP_DIR = application_directory()
 def load_settings(path=APP_DIR / "config.toml"):
     with Path(path).open("rb") as stream:
         config = tomllib.load(stream)
+    config.setdefault("reader", {}).setdefault("persistent_host_control", True)
+    config["reader"].setdefault("debug_log", False)
     config.setdefault("state", {}).setdefault("batch_cards_file", "batch_cards.json")
     for section, keys in {
         "database": ("host", "port", "user", "name", "connect_timeout", "read_timeout", "write_timeout"),
         "interface": ("page_size",),
-        "reader": ("enabled", "library_path", "write_beep_t", "timeout_ms", "poll_interval",
-                   "error_retry_interval", "feedback_retry_interval"),
+        "reader": ("enabled", "library_path", "timeout_ms", "poll_interval",
+                   "error_retry_interval",),
         "state": ("pending_id_file",),
     }.items():
         for key in keys:
@@ -30,16 +32,20 @@ def load_settings(path=APP_DIR / "config.toml"):
                 raise ValueError(f"В config.toml отсутствует [{section}] {key}.")
     for section, key, low, high in (
         ("database", "port", 1, 65535), ("interface", "page_size", 1, 1000),
-        ("reader", "write_beep_t", 1, 255), ("reader", "timeout_ms", 1, 60000),
+        ("reader", "timeout_ms", 1, 60000),
         *(("database", key, 1, 3600) for key in ("connect_timeout", "read_timeout", "write_timeout")),
     ):
         value = config[section][key]
         if type(value) is not int or not low <= value <= high:
             raise ValueError(f"В config.toml [{section}] {key}: целое число {low}…{high}.")
-    for key in ("poll_interval", "error_retry_interval", "feedback_retry_interval"):
+    for key in ("poll_interval", "error_retry_interval",):
         value = config["reader"][key]
         if type(value) not in (int, float) or not 0.01 <= value <= 60:
             raise ValueError(f"В config.toml [reader] {key}: число 0.01…60 секунд.")
+    if type(config["reader"]["persistent_host_control"]) is not bool:
+        raise ValueError("В config.toml [reader] persistent_host_control: true или false.")
+    if type(config["reader"]["debug_log"]) is not bool:
+        raise ValueError("В config.toml [reader] debug_log: true или false.")
     if type(config["reader"]["enabled"]) is not bool:
         raise ValueError("В config.toml [reader] enabled: true или false.")
     for section, keys in {"database": ("host", "user", "name"),

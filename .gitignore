@@ -34,3 +34,6 @@ __pycache__/
 batch_cards*.json
 batch_cards*.json.tmp
 batch_cards*.json.lock
+
+# Диагностические логи считывателя
+reader_debug.log*
