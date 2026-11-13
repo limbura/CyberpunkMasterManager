@@ -99,6 +99,18 @@ class ManagerTests(unittest.TestCase):
         self.assertIn('Библиотека считывателя: wcopy_reader v8.7.6', output)
         self.assertIn('Библиотека принтера: cyberwall_id_printer v1.3.0', output)
 
+    def test_startup_shows_conflict_before_database_login(self):
+        with (patch.object(app, 'CardConsole') as console_service,
+              patch.object(app, 'ThermalPrinterService'),
+              patch.object(app, 'ConnectionStore'),
+              patch.object(app, 'connect_interactively', side_effect=app.QuitRequested)):
+            console_service.return_value.startup_reader_warning = (
+                'Считыватель уже используется другим Master Manager')
+            self.assertEqual(app.main(), 0)
+        self.assertIn(
+            'ВНИМАНИЕ: Считыватель уже используется другим Master Manager',
+            self.output.getvalue())
+
     def test_startup_shows_unavailable_if_modules_are_not_loaded(self):
         with (patch.object(app, 'rfid', None),
               patch.dict(sys.modules, {'cyberwall_id_printer': None})):
