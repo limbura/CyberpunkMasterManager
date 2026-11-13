@@ -74,7 +74,7 @@ class CardConsole:
     def _worker(self):
         last_selected_presentation = None
         last_error = None
-        consecutive_timeouts = 0
+        consecutive_transient_errors = 0
         while True:
             with self.condition:
                 self.condition.wait_for(lambda: not self.write_in_progress or self.stopping)
@@ -95,29 +95,40 @@ class CardConsole:
                                (time.monotonic() - started) * 1000,
                                getattr(card, "uid", b"").hex(" "), card.number,
                                getattr(card, "presentation_id", None), getattr(card, "is_new", None))
-                    consecutive_timeouts = 0
+                    consecutive_transient_errors = 0
                     last_error = None
                 except rfid.NoCardError:
                     _LOG.debug("Карта отсутствует: duration_ms=%.1f", (time.monotonic() - started) * 1000)
-                    consecutive_timeouts = 0
+                    consecutive_transient_errors = 0
                     last_error = None
                 except rfid.RFIDError as error:
-                    # Only background read timeouts get a quiet confirmation poll.
-                    # Never reinterpret a timeout as NoCard, or retry a write here.
-                    if isinstance(error, rfid.ReaderTimeoutError):
-                        consecutive_timeouts += 1
+                    # One background timeout or partial Cyb read is transient:
+                    # suppress the first warning and re-poll at the normal interval.
+                    # Cyb's 0x6C(0,2) reply is 4 status bytes + 32 block bytes;
+                    # the length check excludes unrelated wCopy read status codes.
+                    partial_cyb_read = (
+                        isinstance(error, rfid.CardReadError)
+                        and error.stage == "read"
+                        and error.status in (1, 2)
+                        and len(error.response or b"") == 36
+                    )
+                    transient_error = (isinstance(error, rfid.ReaderTimeoutError)
+                                       or partial_cyb_read)
+                    if transient_error:
+                        consecutive_transient_errors += 1
                     else:
-                        consecutive_timeouts = 0
+                        consecutive_transient_errors = 0
                     _LOG.debug("Опрос считывателя: duration_ms=%.1f code=%s stage=%s status=%r; "
-                               "тайм-аутов подряд=%d: %s", (time.monotonic() - started) * 1000,
-                               error.code, error.stage, error.status, consecutive_timeouts, error)
-                    if consecutive_timeouts != 1:
+                               "временных сбоев подряд=%d: %s", (time.monotonic() - started) * 1000,
+                               error.code, error.stage, error.status, consecutive_transient_errors, error)
+                    if consecutive_transient_errors != 1:
                         signature = (error.code, error.stage, error.status)
                         if signature != last_error:
                             self._send(epoch, f"Считыватель: {error}. Можно продолжать с клавиатуры.")
                         last_error = signature
                         delay = READER_SETTINGS["error_retry_interval"]
-                    # First timeout: ordinary poll_interval, not the long error delay.
+                    # First transient error: normal poll_interval, without a warning.
+                    # No write is retried or reclassified as an absent card.
                 if card is not None and card.presentation_id != last_selected_presentation:
                     with self.condition:
                         if self.active and epoch == self.epoch:
