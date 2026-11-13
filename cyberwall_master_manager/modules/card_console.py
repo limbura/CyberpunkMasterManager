@@ -61,8 +61,19 @@ class CardConsole:
         self.epoch = 0
         self.stopping = False
         self.thread = None
+        self.startup_reader_warning = None
         if self.enabled:
             rfid.set_persistent_host_control(READER_SETTINGS["persistent_host_control"])
+            # Check cooperative ownership before starting the background poll.
+            # This uses HID enumeration only; no RF commands or USB open.
+            # Missing/unplugged readers are normal and may be connected later.
+            if hasattr(rfid, "reserve_reader"):
+                try:
+                    rfid.reserve_reader()
+                except (rfid.ReaderNotFoundError, rfid.MultipleReadersError):
+                    pass
+                except rfid.RFIDError as error:
+                    self.startup_reader_warning = str(error)
             self.thread = threading.Thread(target=self._worker, daemon=True)
             self.thread.start()
 
