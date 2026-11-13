@@ -8,6 +8,7 @@ on:
       - 'cyberwall_master_manager/**'
       - '.github/workflows/windows-portable.yml'
       - '.github/actions/reader-release/**'
+      - '.github/actions/printer-release/**'
   pull_request:
 
 permissions:
@@ -27,6 +28,12 @@ jobs:
         with:
           token: ${{ github.token }}
           minimum-version: '1.7.0'
+      - name: Get latest stable cyberwall_id_printer release
+        id: printer_release
+        uses: ./CyberpunkMasterManager/.github/actions/printer-release
+        with:
+          token: ${{ github.token }}
+          minimum-version: '1.3.0'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -37,7 +44,7 @@ jobs:
       - name: Test application and builder
         working-directory: CyberpunkMasterManager/cyberwall_master_manager
         run: python -m unittest discover -s tests -v
-      - name: Full standalone ZIP location
+      - name: How to publish a full Windows ZIP
         shell: pwsh
         run: |
-          'Full ZIP with printing is built in [CyberpunkIdPrinter / Windows standalone manager](https://github.com/limbura/CyberpunkIdPrinter/actions/workflows/windows-manager.yml).' >> $env:GITHUB_STEP_SUMMARY
+          'This workflow only runs tests. The full offline Windows ZIP is published by [Master Manager / Release Windows ZIP](https://github.com/limbura/CyberpunkMasterManager/actions/workflows/release.yml) when a new Master Manager version tag is pushed.' >> $env:GITHUB_STEP_SUMMARY
