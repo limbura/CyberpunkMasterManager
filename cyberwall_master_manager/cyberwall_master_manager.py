@@ -17,7 +17,7 @@ from pathlib import Path
 from modules.settings import SETTINGS, APP_DIR, app_path
 from modules.thermal_printer import ThermalPrinterService
 from modules import printer_menu
-from modules.card_console import CardConsole, ScannedCard, CardNotPresentError, READER_IMPORT_ERROR
+from modules.card_console import CardConsole, ScannedCard, CardNotPresentError, READER_IMPORT_ERROR, rfid
 from modules.reader_debug import configure_reader_debug_logging, close_reader_debug_logging
 from modules.account_fields import validate_name, NAME_RULES, LABELS, column_hint, parse_column, editable_columns, validate_column
 from modules import batch_cards
@@ -1107,6 +1107,16 @@ def print_sql_error(error):
         print("Проверь наличие setLockAccess и changeId в подключённой базе.")
 
 
+def print_library_versions():
+    """Show versions of modules already loaded by the reader and printer services."""
+    def loaded_version(module):
+        version = getattr(module, "__version__", None) if module is not None else None
+        return f"v{clean(version)}" if isinstance(version, str) and version.strip() else "Недоступна"
+
+    print(f"Библиотека считывателя: wcopy_reader {loaded_version(rfid)}")
+    print(f"Библиотека принтера: cyberwall_id_printer {loaded_version(sys.modules.get('cyberwall_id_printer'))}")
+
+
 def main():
     global CONSOLE, THERMAL_PRINTER
     connection = None
@@ -1120,6 +1130,7 @@ def main():
         CONSOLE = CardConsole(READER_ENABLED)
         THERMAL_PRINTER = ThermalPrinterService(SETTINGS['printer'], APP_DIR / 'config.toml')
         THERMAL_PRINTER.start()
+        print_library_versions()
         store = ConnectionStore()
         automatic, defaults = True, None
         while True:

@@ -78,6 +78,40 @@ class ManagerTests(unittest.TestCase):
         db.account_by_card.return_value = ACCOUNT
         db.connection = connection(Cursor())
         return db
+    def test_startup_reports_versions_from_modules_loaded_by_services(self):
+        reader = types.ModuleType('wcopy_reader')
+        reader.__version__ = '8.7.6'
+        printer = types.ModuleType('cyberwall_id_printer')
+        printer.__version__ = '1.3.0'
+        with (patch.object(app, 'rfid', reader),
+              patch.dict(sys.modules, {'cyberwall_id_printer': None}),
+              patch.object(app, 'CardConsole'),
+              patch.object(app, 'ThermalPrinterService') as thermal_service,
+              patch.object(app, 'ConnectionStore'),
+              patch.object(app, 'connect_interactively', side_effect=app.QuitRequested)):
+            thermal_service.return_value.start.side_effect = (
+                lambda: sys.modules.__setitem__('cyberwall_id_printer', printer))
+            self.assertEqual(app.main(), 0)
+            thermal_service.return_value.start.assert_called_once_with()
+            thermal_service.return_value.close.assert_called_once_with()
+        output = self.output.getvalue()
+        self.assertIn('CYBERWALL - менеджмент для мастеров (v' + app.VERSION + ')', output)
+        self.assertIn('Библиотека считывателя: wcopy_reader v8.7.6', output)
+        self.assertIn('Библиотека принтера: cyberwall_id_printer v1.3.0', output)
+
+    def test_startup_shows_unavailable_if_modules_are_not_loaded(self):
+        with (patch.object(app, 'rfid', None),
+              patch.dict(sys.modules, {'cyberwall_id_printer': None})):
+            app.print_library_versions()
+        self.assertIn('Библиотека считывателя: wcopy_reader Недоступна', self.output.getvalue())
+        self.assertIn('Библиотека принтера: cyberwall_id_printer Недоступна', self.output.getvalue())
+
+    def test_startup_does_not_guess_versions_for_modules_without_version(self):
+        with (patch.object(app, 'rfid', types.ModuleType('wcopy_reader')),
+              patch.dict(sys.modules, {'cyberwall_id_printer': types.ModuleType('cyberwall_id_printer')})):
+            app.print_library_versions()
+        self.assertEqual(self.output.getvalue().count('Недоступна'), 2)
+
     def test_table_fields_and_large_card_id(self):
         table = app.make_entity_table([ACCOUNT])
         text = table.header + "\n" + table.lines[0]
