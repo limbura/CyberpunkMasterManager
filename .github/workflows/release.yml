@@ -30,12 +30,12 @@ jobs:
           ref: 1c07d6d8cd61e097a73b072e29a632ab67d86e32
           persist-credentials: false
           path: CyberpunkIdPrinter
-      - uses: actions/checkout@v4
+      - name: Get latest stable wcopy_reader release
+        id: reader_release
+        uses: ./CyberpunkMasterManager/.github/actions/reader-release
         with:
-          repository: limbura/CyberpunkPcRfidReader
-          ref: d51466c2ac952eac8307366b3059fa0e7bb12282
-          persist-credentials: false
-          path: CyberpunkPcRfidReader
+          token: ${{ github.token }}
+          minimum-version: '1.7.0'
       - uses: actions/checkout@v4
         with:
           repository: Dejniel/TiMini-Print
