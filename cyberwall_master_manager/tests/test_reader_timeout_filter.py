@@ -8,6 +8,33 @@ from test_cyberwall_master_manager import console
 r = console.rfid
 
 
+class StartupOwnershipTests(unittest.TestCase):
+    def start_with_reservation_error(self, error):
+        with (patch.object(console.rfid, 'reserve_reader', create=True,
+                           side_effect=error) as reserve,
+              patch.object(console.threading, 'Thread') as thread,
+              patch.object(console.rfid, 'set_persistent_host_control'),
+              patch.object(console.rfid, 'close_readers')):
+            device = console.CardConsole()
+            try:
+                reserve.assert_called_once_with()
+                thread.return_value.start.assert_called_once_with()
+                return device.startup_reader_warning
+            finally:
+                device.close()
+
+    def test_busy_warning_is_available_before_first_prompt(self):
+        busy = type('Busy', (r.RFIDError,), {'code': 'READER_BUSY'})
+        message = 'Считыватель уже используется другим Master Manager'
+        warning = self.start_with_reservation_error(busy(message, stage='lock'))
+        self.assertEqual(warning, message)
+
+    def test_unplugged_reader_is_not_a_startup_warning(self):
+        warning = self.start_with_reservation_error(
+            r.ReaderNotFoundError('Нет считывателя', stage='enumerate'))
+        self.assertIsNone(warning)
+
+
 class TransientPollTests(unittest.TestCase):
     def timeout(self, stage='poll'):
         return r.ReaderTimeoutError('late', stage=stage)
