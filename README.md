@@ -187,6 +187,13 @@ py -3.13 build_release.py --reader "../../CyberpunkPcRfidReader/wcopy_reader_pac
 собирает Windows x64 ZIP и после самопроверки публикует его в **Releases**
 репозитория менеджера. Тег должен совпадать с `v` + `VERSION` в отмеченном коммите.
 
+Описание GitHub Release автоматически содержит **версии библиотеки считывателя**
+`wcopy_reader` и **библиотеки принтера** `cyberwall_id_printer`, взятые из
+`BUILD_INFO.json` *именно того ZIP*, который публикуется. Исходные заметки о
+новых изменениях GitHub также генерирует автоматически. Если версия внутри
+архива не совпадает с тегом или отсутствуют версии библиотек, публикация
+останавливается, чтобы не указать неверный состав сборки.
+
 Оба workflow этого репозитория — **Release Windows ZIP** и **Manager tests** — берут
 **последний опубликованный стабильный GitHub Release** библиотеки
 [CyberpunkPcRfidReader](https://github.com/limbura/CyberpunkPcRfidReader/releases/latest),
