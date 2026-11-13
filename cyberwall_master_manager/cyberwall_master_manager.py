@@ -39,7 +39,7 @@ DATABASE_NAME = SETTINGS["database"]["name"]
 PAGE_SIZE = SETTINGS["interface"]["page_size"]
 READER_ENABLED = SETTINGS["reader"]["enabled"]
 PENDING_ID_PATH = app_path(SETTINGS["state"]["pending_id_file"])
-VERSION = "2.12.3"
+VERSION = "2.12.4"
 BATCH_PATH = app_path(SETTINGS["state"]["batch_cards_file"])
 CONSOLE = None
 THERMAL_PRINTER = None
@@ -1131,6 +1131,10 @@ def main():
         THERMAL_PRINTER = ThermalPrinterService(SETTINGS['printer'], APP_DIR / 'config.toml')
         THERMAL_PRINTER.start()
         print_library_versions()
+        startup_warning = getattr(CONSOLE, "startup_reader_warning", None)
+        if isinstance(startup_warning, str) and startup_warning:
+            print(f"ВНИМАНИЕ: {clean(startup_warning)}")
+            print("Доступ к считывателю будет проверяться повторно автоматически.")
         store = ConnectionStore()
         automatic, defaults = True, None
         while True:

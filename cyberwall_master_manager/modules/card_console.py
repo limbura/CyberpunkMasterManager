@@ -61,8 +61,19 @@ class CardConsole:
         self.epoch = 0
         self.stopping = False
         self.thread = None
+        self.startup_reader_warning = None
         if self.enabled:
             rfid.set_persistent_host_control(READER_SETTINGS["persistent_host_control"])
+            # Check cooperative ownership before starting the background poll.
+            # This uses HID enumeration only; no RF commands or USB open.
+            # Missing/unplugged readers are normal and may be connected later.
+            if hasattr(rfid, "reserve_reader"):
+                try:
+                    rfid.reserve_reader()
+                except (rfid.ReaderNotFoundError, rfid.MultipleReadersError):
+                    pass
+                except rfid.RFIDError as error:
+                    self.startup_reader_warning = str(error)
             self.thread = threading.Thread(target=self._worker, daemon=True)
             self.thread.start()
 
@@ -74,7 +85,8 @@ class CardConsole:
     def _worker(self):
         last_selected_presentation = None
         last_error = None
-        consecutive_timeouts = 0
+        last_error_epoch = None
+        consecutive_transient_errors = 0
         while True:
             with self.condition:
                 self.condition.wait_for(lambda: not self.write_in_progress or self.stopping)
@@ -95,29 +107,45 @@ class CardConsole:
                                (time.monotonic() - started) * 1000,
                                getattr(card, "uid", b"").hex(" "), card.number,
                                getattr(card, "presentation_id", None), getattr(card, "is_new", None))
-                    consecutive_timeouts = 0
+                    consecutive_transient_errors = 0
                     last_error = None
                 except rfid.NoCardError:
                     _LOG.debug("Карта отсутствует: duration_ms=%.1f", (time.monotonic() - started) * 1000)
-                    consecutive_timeouts = 0
+                    consecutive_transient_errors = 0
                     last_error = None
                 except rfid.RFIDError as error:
-                    # Only background read timeouts get a quiet confirmation poll.
-                    # Never reinterpret a timeout as NoCard, or retry a write here.
-                    if isinstance(error, rfid.ReaderTimeoutError):
-                        consecutive_timeouts += 1
+                    # One background timeout or partial Cyb read is transient:
+                    # suppress the first warning and re-poll at the normal interval.
+                    # Cyb's 0x6C(0,2) reply is 4 status bytes + 32 block bytes;
+                    # the length check excludes unrelated wCopy read status codes.
+                    partial_cyb_read = (
+                        isinstance(error, rfid.CardReadError)
+                        and error.stage == "read"
+                        and error.status in (1, 2)
+                        and len(error.response or b"") == 36
+                    )
+                    transient_error = (isinstance(error, rfid.ReaderTimeoutError)
+                                       or partial_cyb_read)
+                    if transient_error:
+                        consecutive_transient_errors += 1
                     else:
-                        consecutive_timeouts = 0
+                        consecutive_transient_errors = 0
                     _LOG.debug("Опрос считывателя: duration_ms=%.1f code=%s stage=%s status=%r; "
-                               "тайм-аутов подряд=%d: %s", (time.monotonic() - started) * 1000,
-                               error.code, error.stage, error.status, consecutive_timeouts, error)
-                    if consecutive_timeouts != 1:
+                               "временных сбоев подряд=%d: %s", (time.monotonic() - started) * 1000,
+                               error.code, error.stage, error.status, consecutive_transient_errors, error)
+                    if consecutive_transient_errors != 1:
                         signature = (error.code, error.stage, error.status)
-                        if signature != last_error:
-                            self._send(epoch, f"Считыватель: {error}. Можно продолжать с клавиатуры.")
+                        # Background polling may see the error before an input
+                        # prompt starts. Show it when a new prompt becomes active.
+                        if signature != last_error or epoch != last_error_epoch:
+                            message = (str(error) if error.code == "READER_BUSY" else
+                                       f"Считыватель: {error}. Можно продолжать с клавиатуры.")
+                            self._send(epoch, message)
                         last_error = signature
+                        last_error_epoch = epoch
                         delay = READER_SETTINGS["error_retry_interval"]
-                    # First timeout: ordinary poll_interval, not the long error delay.
+                    # First transient error: normal poll_interval, without a warning.
+                    # No write is retried or reclassified as an absent card.
                 if card is not None and card.presentation_id != last_selected_presentation:
                     with self.condition:
                         if self.active and epoch == self.epoch:
