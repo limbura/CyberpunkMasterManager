@@ -1,4 +1,4 @@
-"""Transient background timeouts must not hide persistent failures or retry writes."""
+"""Transient timeouts and partial Cyb reads must not hide persistent failures or retry writes."""
 import queue
 import types
 import unittest
@@ -8,9 +8,15 @@ from test_cyberwall_master_manager import console
 r = console.rfid
 
 
-class PollTimeoutTests(unittest.TestCase):
+class TransientPollTests(unittest.TestCase):
     def timeout(self, stage='poll'):
         return r.ReaderTimeoutError('late', stage=stage)
+
+    def partial_cyb_read(self, status=1):
+        return r.CardReadError(
+            'Cyb не прочитал оба блока 0 и 1',
+            stage='read', status=status,
+            response=status.to_bytes(4, 'big') + bytes(32))
 
     def run_poll(self, values):
         device = console.CardConsole(enabled=False)
@@ -74,6 +80,47 @@ class PollTimeoutTests(unittest.TestCase):
         card = types.SimpleNamespace(number=123, presentation_id=1)
         events, _ = self.run_poll([card, self.timeout(), card])
         self.assertEqual(events, [console.ScannedCard(123)])
+
+    def test_first_partial_read_is_quiet_and_uses_normal_poll_interval(self):
+        card = types.SimpleNamespace(number=123, presentation_id=1)
+        events, delays = self.run_poll([self.partial_cyb_read(), card])
+        self.assertEqual(events, [console.ScannedCard(123)])
+        self.assertEqual(delays, [console.READER_SETTINGS['poll_interval']]*2)
+
+    def test_repeated_partial_reads_report_once_and_use_error_interval(self):
+        error = self.partial_cyb_read(2)
+        events, delays = self.run_poll([error, error, error])
+        self.assertEqual(len(events), 1)
+        self.assertIn('Cyb не прочитал оба блока', events[0])
+        self.assertEqual(delays, [console.READER_SETTINGS['poll_interval'],
+                                 console.READER_SETTINGS['error_retry_interval'],
+                                 console.READER_SETTINGS['error_retry_interval']])
+
+    def test_mixed_timeout_and_partial_read_count_as_two_transient_failures(self):
+        events, delays = self.run_poll([self.timeout(), self.partial_cyb_read()])
+        self.assertEqual(len(events), 1)
+        self.assertEqual(delays, [console.READER_SETTINGS['poll_interval'],
+                                 console.READER_SETTINGS['error_retry_interval']])
+
+    def test_no_card_resets_partial_read_streak(self):
+        absent = r.NoCardError('none', stage='read')
+        events, delays = self.run_poll(
+            [self.partial_cyb_read(), absent, self.partial_cyb_read(), absent])
+        self.assertEqual(events, [])
+        self.assertEqual(delays, [console.READER_SETTINGS['poll_interval']]*4)
+
+    def test_other_read_errors_still_warn_immediately(self):
+        for error in (
+            r.CardReadError('wCopy status', stage='read', status=1, response=b'\x01'),
+            r.CardReadError('unexpected Cyb mask', stage='read', status=4,
+                            response=bytes(36)),
+            r.CardReadError('unrelated stage', stage='verify', status=1,
+                            response=bytes(36)),
+        ):
+            with self.subTest(error=str(error)):
+                events, delays = self.run_poll([error])
+                self.assertEqual(len(events), 1)
+                self.assertEqual(delays, [console.READER_SETTINGS['error_retry_interval']])
 
     def test_write_timeout_propagates_once(self):
         device = console.CardConsole(enabled=False)
