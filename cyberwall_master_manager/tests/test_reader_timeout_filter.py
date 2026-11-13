@@ -18,9 +18,10 @@ class TransientPollTests(unittest.TestCase):
             stage='read', status=status,
             response=status.to_bytes(4, 'big') + bytes(32))
 
-    def run_poll(self, values):
+    def run_poll(self, values, *, start_active=True, activate_after_poll=None):
         device = console.CardConsole(enabled=False)
-        device._start_scan()
+        if start_active:
+            device._start_scan()
         sequence = iter(values)
         delays = []
         def read(**kwargs):
@@ -29,6 +30,8 @@ class TransientPollTests(unittest.TestCase):
             return value
         def wait(delay):
             delays.append(delay)
+            if len(delays) == activate_after_poll:
+                device._start_scan()
             if len(delays) == len(values): device.stopping = True
             return False
         with patch.object(console.rfid, 'read_card', side_effect=read), \
@@ -121,6 +124,21 @@ class TransientPollTests(unittest.TestCase):
                 events, delays = self.run_poll([error])
                 self.assertEqual(len(events), 1)
                 self.assertEqual(delays, [console.READER_SETTINGS['error_retry_interval']])
+
+    def test_reader_busy_is_reported_in_clear_language(self):
+        BusyError = type('BusyError', (r.RFIDError,), {'code': 'READER_BUSY'})
+        error = BusyError('Считыватель уже используется другим Master Manager', stage='lock')
+        events, delays = self.run_poll([error, error])
+        self.assertEqual(events, [str(error)])
+        self.assertEqual(delays, [console.READER_SETTINGS['error_retry_interval']]*2)
+
+    def test_reader_busy_is_reported_when_input_prompt_opens_later(self):
+        BusyError = type('BusyError', (r.RFIDError,), {'code': 'READER_BUSY'})
+        error = BusyError('Считыватель уже используется другим Master Manager', stage='lock')
+        events, delays = self.run_poll(
+            [error, error], start_active=False, activate_after_poll=1)
+        self.assertEqual(events, [str(error)])
+        self.assertEqual(delays, [console.READER_SETTINGS['error_retry_interval']]*2)
 
     def test_write_timeout_propagates_once(self):
         device = console.CardConsole(enabled=False)
