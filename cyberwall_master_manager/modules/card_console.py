@@ -74,6 +74,7 @@ class CardConsole:
     def _worker(self):
         last_selected_presentation = None
         last_error = None
+        last_error_epoch = None
         consecutive_transient_errors = 0
         while True:
             with self.condition:
@@ -123,9 +124,14 @@ class CardConsole:
                                error.code, error.stage, error.status, consecutive_transient_errors, error)
                     if consecutive_transient_errors != 1:
                         signature = (error.code, error.stage, error.status)
-                        if signature != last_error:
-                            self._send(epoch, f"Считыватель: {error}. Можно продолжать с клавиатуры.")
+                        # Background polling may see the error before an input
+                        # prompt starts. Show it when a new prompt becomes active.
+                        if signature != last_error or epoch != last_error_epoch:
+                            message = (str(error) if error.code == "READER_BUSY" else
+                                       f"Считыватель: {error}. Можно продолжать с клавиатуры.")
+                            self._send(epoch, message)
                         last_error = signature
+                        last_error_epoch = epoch
                         delay = READER_SETTINGS["error_retry_interval"]
                     # First transient error: normal poll_interval, without a warning.
                     # No write is retried or reclassified as an absent card.
