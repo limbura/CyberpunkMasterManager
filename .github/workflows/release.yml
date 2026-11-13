@@ -67,9 +67,22 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: release-zip
+      - uses: actions/checkout@v4
+        with:
+          path: CyberpunkMasterManager
+          persist-credentials: false
+      - name: Get component versions from the built ZIP
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 CyberpunkMasterManager/cyberwall_master_manager/release_notes.py \
+            --archive "cyberwall_master_manager_${RELEASE_TAG}_windows_x64.zip" \
+            --tag "$RELEASE_TAG" \
+            --output release-library-notes.md
       - name: Publish ZIP on GitHub Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" "cyberwall_master_manager_${GITHUB_REF_NAME}_windows_x64.zip" \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+            --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" \
+            --notes "$(cat release-library-notes.md)" --generate-notes
